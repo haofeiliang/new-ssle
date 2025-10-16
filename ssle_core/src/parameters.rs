@@ -1,20 +1,21 @@
-use primus_barrett_modulus::{
-    Barrett, BarrettModulus, integer::multiply_many_values, reduce::Modulus,
-};
 use primus_decompose::big_integer::BigUintApproxSignedBasis;
 use primus_fhe_core::{CrtGgswParameters, CrtGlevParameters, RingSecretKeyType, RlweParameters};
+use primus_modulus::{Barrett, BarrettModulus, integer::multiply_many_values};
+use primus_rns::RNSBase;
 
 #[derive(Barrett)]
 #[modulus(u32, value = 12289)]
 pub struct CommitModulus;
+
+pub type CrtValueT = u64;
 
 /// Parameters for ssle.
 #[derive(Clone)]
 pub struct SsleParameters {
     commit_params: RlweParameters<u32, CommitModulus>,
     commit_message_length: usize,
-    ring_params: CrtGgswParameters<u64, BarrettModulus<u64>>,
-    expand_coeff_params: CrtGlevParameters<u64, BarrettModulus<u64>>,
+    ring_params: CrtGgswParameters<CrtValueT, BarrettModulus<CrtValueT>>,
+    expand_coeff_params: CrtGlevParameters<CrtValueT, BarrettModulus<CrtValueT>>,
 }
 
 impl SsleParameters {
@@ -24,72 +25,49 @@ impl SsleParameters {
         let commit_message_length = 60;
 
         if party_count <= 128 {
-            let commit_params = RlweParameters {
-                poly_length: 512,
-                plain_modulus_value: 2,
-                modulus_minus_one: CommitModulus.minus_one(),
-                modulus: CommitModulus,
-                secret_key_type: RingSecretKeyType::Ternary,
-                noise_standard_deviation: 3.19,
-            };
+            let commit_params =
+                RlweParameters::new(512, 2, CommitModulus, RingSecretKeyType::Ternary, 3.19);
 
-            let rns_moduli: [u64; 2] = [1125899906826241, 1125899906629633];
-            let modulus = multiply_many_values(&rns_moduli);
-            let modulus_minus_one = {
-                let mut temp = modulus.clone();
-                temp[0] -= 1;
-                temp
-            };
+            let rns_moduli: [CrtValueT; 2] = [1125899906826241, 1125899906629633];
+
             let moduli = rns_moduli.map(BarrettModulus::new).to_vec();
+            let rns_base = RNSBase::new(&moduli).unwrap();
+            let modulus = rns_base.moduli_product().to_vec();
+
             let basis = match party_count {
-                2 => BigUintApproxSignedBasis::new(&modulus, 31, Some(2)),
-                4 => BigUintApproxSignedBasis::new(&modulus, 25, Some(3)),
-                8 => BigUintApproxSignedBasis::new(&modulus, 25, Some(3)),
-                16 => BigUintApproxSignedBasis::new(&modulus, 23, Some(3)),
-                32 => BigUintApproxSignedBasis::new(&modulus, 20, Some(4)),
-                64 => BigUintApproxSignedBasis::new(&modulus, 18, Some(4)),
-                128 => BigUintApproxSignedBasis::new(&modulus, 16, Some(5)),
+                2 => BigUintApproxSignedBasis::new(&modulus, 31, Some(2), &rns_base),
+                4 => BigUintApproxSignedBasis::new(&modulus, 25, Some(3), &rns_base),
+                8 => BigUintApproxSignedBasis::new(&modulus, 25, Some(3), &rns_base),
+                16 => BigUintApproxSignedBasis::new(&modulus, 23, Some(3), &rns_base),
+                32 => BigUintApproxSignedBasis::new(&modulus, 20, Some(4), &rns_base),
+                64 => BigUintApproxSignedBasis::new(&modulus, 18, Some(4), &rns_base),
+                128 => BigUintApproxSignedBasis::new(&modulus, 16, Some(5), &rns_base),
                 _ => unreachable!(),
             };
 
-            let ring_params = CrtGgswParameters {
-                dimension: 8,
-                poly_length: 512,
-                modulus_minus_one: modulus_minus_one.clone(),
-                modulus: modulus.clone(),
-                moduli: moduli.clone(),
-                secret_key_type: RingSecretKeyType::Ternary,
-                noise_standard_deviation: 0.849,
-                basis,
-            };
+            let ring_params =
+                CrtGgswParameters::new(8, 512, &moduli, RingSecretKeyType::Ternary, 0.849, basis);
 
             let basis = match party_count {
-                2 => BigUintApproxSignedBasis::new(&modulus, 34, Some(2)),
-                4 => BigUintApproxSignedBasis::new(&modulus, 34, Some(2)),
-                8 => BigUintApproxSignedBasis::new(&modulus, 25, Some(3)),
-                16 => BigUintApproxSignedBasis::new(&modulus, 25, Some(3)),
-                32 => BigUintApproxSignedBasis::new(&modulus, 25, Some(3)),
-                64 => BigUintApproxSignedBasis::new(&modulus, 20, Some(4)),
-                128 => BigUintApproxSignedBasis::new(&modulus, 17, Some(5)),
+                2 => BigUintApproxSignedBasis::new(&modulus, 34, Some(2), &rns_base),
+                4 => BigUintApproxSignedBasis::new(&modulus, 34, Some(2), &rns_base),
+                8 => BigUintApproxSignedBasis::new(&modulus, 25, Some(3), &rns_base),
+                16 => BigUintApproxSignedBasis::new(&modulus, 25, Some(3), &rns_base),
+                32 => BigUintApproxSignedBasis::new(&modulus, 25, Some(3), &rns_base),
+                64 => BigUintApproxSignedBasis::new(&modulus, 20, Some(4), &rns_base),
+                128 => BigUintApproxSignedBasis::new(&modulus, 17, Some(5), &rns_base),
                 _ => unreachable!(),
             };
 
-            let expand_coeff_params = CrtGlevParameters {
-                dimension: 8,
-                poly_length: 512,
-                modulus_minus_one,
-                modulus,
-                moduli,
-                secret_key_type: RingSecretKeyType::Ternary,
-                noise_standard_deviation: 0.849,
-                basis,
-            };
+            let expand_coeff_params =
+                CrtGlevParameters::new(8, 512, &moduli, RingSecretKeyType::Ternary, 0.849, basis);
 
-            assert_eq!(ring_params.dimension, expand_coeff_params.dimension);
-            assert_eq!(ring_params.modulus, expand_coeff_params.modulus);
+            assert_eq!(ring_params.dimension(), expand_coeff_params.dimension());
+            assert_eq!(ring_params.poly_length(), expand_coeff_params.poly_length());
+            assert_eq!(ring_params.modulus(), expand_coeff_params.modulus());
             assert_eq!(
-                ring_params.secret_key_type,
-                expand_coeff_params.secret_key_type
+                ring_params.secret_key_type(),
+                expand_coeff_params.secret_key_type()
             );
 
             Self {
@@ -99,66 +77,42 @@ impl SsleParameters {
                 expand_coeff_params,
             }
         } else {
-            let commit_params = RlweParameters {
-                poly_length: 1024,
-                plain_modulus_value: 2,
-                modulus_minus_one: CommitModulus.minus_one(),
-                modulus: CommitModulus,
-                secret_key_type: RingSecretKeyType::Ternary,
-                noise_standard_deviation: 0.849,
-            };
+            let commit_params =
+                RlweParameters::new(1024, 2, CommitModulus, RingSecretKeyType::Ternary, 0.849);
 
-            let rns_moduli: [u64; 3] = [137438822401, 68719403009, 68719230977];
+            let rns_moduli: [CrtValueT; 3] = [137438822401, 68719403009, 68719230977];
             let modulus = multiply_many_values(&rns_moduli);
-            let modulus_minus_one = {
-                let mut temp = modulus.clone();
-                temp[0] -= 1;
-                temp
-            };
             let moduli = rns_moduli.map(BarrettModulus::new).to_vec();
+            let rns_base = RNSBase::new(&moduli).unwrap();
+
             let basis = match party_count {
-                256 => BigUintApproxSignedBasis::new(&modulus, 17, Some(5)),
-                512 => BigUintApproxSignedBasis::new(&modulus, 16, Some(6)),
-                1024 => BigUintApproxSignedBasis::new(&modulus, 14, Some(6)),
-                2048 => BigUintApproxSignedBasis::new(&modulus, 11, Some(8)),
+                256 => BigUintApproxSignedBasis::new(&modulus, 17, Some(5), &rns_base),
+                512 => BigUintApproxSignedBasis::new(&modulus, 16, Some(6), &rns_base),
+                1024 => BigUintApproxSignedBasis::new(&modulus, 14, Some(6), &rns_base),
+                2048 => BigUintApproxSignedBasis::new(&modulus, 11, Some(8), &rns_base),
                 _ => unreachable!(),
             };
 
-            let ring_params = CrtGgswParameters {
-                dimension: 4,
-                poly_length: 1024,
-                modulus_minus_one: modulus_minus_one.clone(),
-                modulus: modulus.clone(),
-                moduli: moduli.clone(),
-                secret_key_type: RingSecretKeyType::Ternary,
-                noise_standard_deviation: 5.56,
-                basis,
-            };
+            let ring_params =
+                CrtGgswParameters::new(4, 1024, &moduli, RingSecretKeyType::Ternary, 5.56, basis);
 
             let basis = match party_count {
-                256 => BigUintApproxSignedBasis::new(&modulus, 19, Some(5)),
-                512 => BigUintApproxSignedBasis::new(&modulus, 17, Some(6)),
-                1024 => BigUintApproxSignedBasis::new(&modulus, 14, Some(7)),
-                2048 => BigUintApproxSignedBasis::new(&modulus, 12, Some(9)),
+                256 => BigUintApproxSignedBasis::new(&modulus, 19, Some(5), &rns_base),
+                512 => BigUintApproxSignedBasis::new(&modulus, 17, Some(6), &rns_base),
+                1024 => BigUintApproxSignedBasis::new(&modulus, 14, Some(7), &rns_base),
+                2048 => BigUintApproxSignedBasis::new(&modulus, 12, Some(9), &rns_base),
                 _ => unreachable!(),
             };
 
-            let expand_coeff_params = CrtGlevParameters {
-                dimension: 4,
-                poly_length: 1024,
-                modulus_minus_one,
-                modulus,
-                moduli,
-                secret_key_type: RingSecretKeyType::Ternary,
-                noise_standard_deviation: 5.56,
-                basis,
-            };
+            let expand_coeff_params =
+                CrtGlevParameters::new(4, 1024, &moduli, RingSecretKeyType::Ternary, 5.56, basis);
 
-            assert_eq!(ring_params.dimension, expand_coeff_params.dimension);
-            assert_eq!(ring_params.modulus, expand_coeff_params.modulus);
+            assert_eq!(ring_params.dimension(), expand_coeff_params.dimension());
+            assert_eq!(ring_params.poly_length(), expand_coeff_params.poly_length());
+            assert_eq!(ring_params.modulus(), expand_coeff_params.modulus());
             assert_eq!(
-                ring_params.secret_key_type,
-                expand_coeff_params.secret_key_type
+                ring_params.secret_key_type(),
+                expand_coeff_params.secret_key_type()
             );
 
             Self {
@@ -170,8 +124,8 @@ impl SsleParameters {
         }
     }
 
-    pub fn commit_params(&self) -> RlweParameters<u32, CommitModulus> {
-        self.commit_params
+    pub fn commit_params(&self) -> &RlweParameters<u32, CommitModulus> {
+        &self.commit_params
     }
 
     pub fn commit_message_length(&self) -> usize {

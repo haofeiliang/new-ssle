@@ -1,5 +1,5 @@
 [workspace]
-members = ["network","ssle_core"]
+members = ["network", "ssle_core"]
 resolver = "3"
 
 [workspace.dependencies]
@@ -8,12 +8,18 @@ tokio = { version = "1", features = ["full"] }
 rand = "0.9"
 serde = { version = "1.0", features = ["derive"] }
 bytes = { version = "1", features = ["serde"] }
+bytemuck = "1.23"
 rayon = "1.10.0"
 criterion = "0.7"
 
+primus_integer = { path = "../primus/primus_integer" }
 primus_fhe_core = { path = "../primus/primus_fhe_core" }
-primus_barrett_modulus = { path = "../primus/primus_barrett_modulus" }
+primus_modulus = { path = "../primus/primus_modulus" }
 primus_decompose = { path = "../primus/primus_decompose" }
+primus_ntt = { path = "../primus/primus_ntt" }
+primus_rns = { path = "../primus/primus_rns" }
+primus_lattice = { path = "../primus/primus_lattice" }
+
 
 [profile.dev]
 opt-level = 1
