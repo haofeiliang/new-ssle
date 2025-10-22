@@ -1,7 +1,7 @@
 use clap::Parser;
 use mimalloc::MiMalloc;
 use network::netio::Participant;
-use ssle_core::SsleParameters;
+use ssle_core::{KeyGen, SsleParameters};
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -53,4 +53,6 @@ fn main() {
     let rng = &mut rand::rng();
 
     let participants = Participant::from_default(party_count, BASE_PORT);
+
+    let (msk, mpk) = KeyGen::generate_keys(params, rng);
 }

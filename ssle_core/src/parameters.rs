@@ -1,6 +1,8 @@
 use primus_decompose::big_integer::BigUintApproxSignedBasis;
-use primus_fhe_core::{CrtGgswParameters, CrtGlevParameters, RingSecretKeyType, RlweParameters};
-use primus_modulus::{Barrett, BarrettModulus, integer::multiply_many_values};
+use primus_fhe_core::{
+    CrtGgswParameters, CrtGlevParameters, CrtGlweParameters, RingSecretKeyType, RlweParameters,
+};
+use primus_modulus::{Barrett, BarrettModulus, integer::multiply_many_values, reduce::Modulus};
 use primus_rns::RNSBase;
 
 #[derive(Barrett)]
@@ -14,7 +16,8 @@ pub type CrtValueT = u64;
 pub struct SsleParameters {
     commit_params: RlweParameters<u32, CommitModulus>,
     commit_message_length: usize,
-    ring_params: CrtGgswParameters<CrtValueT, BarrettModulus<CrtValueT>>,
+    ring_params: CrtGlweParameters<CrtValueT, BarrettModulus<CrtValueT>>,
+    ggsw_params: CrtGgswParameters<CrtValueT, BarrettModulus<CrtValueT>>,
     expand_coeff_params: CrtGlevParameters<CrtValueT, BarrettModulus<CrtValueT>>,
 }
 
@@ -45,8 +48,17 @@ impl SsleParameters {
                 _ => unreachable!(),
             };
 
-            let ring_params =
-                CrtGgswParameters::new(8, 512, &moduli, RingSecretKeyType::Ternary, 0.849, basis);
+            let ring_params = CrtGlweParameters::new(
+                8,
+                512,
+                BarrettModulus::new(CommitModulus.value_unchecked() as CrtValueT),
+                BarrettModulus::new(2305843009213554689),
+                &moduli,
+                RingSecretKeyType::Ternary,
+                0.849,
+            );
+
+            let ggsw_params = CrtGgswParameters::with_glwe_params(&ring_params, basis);
 
             let basis = match party_count {
                 2 => BigUintApproxSignedBasis::new(&modulus, 34, Some(2), &rns_base),
@@ -64,7 +76,10 @@ impl SsleParameters {
 
             assert_eq!(ring_params.dimension(), expand_coeff_params.dimension());
             assert_eq!(ring_params.poly_length(), expand_coeff_params.poly_length());
-            assert_eq!(ring_params.modulus(), expand_coeff_params.modulus());
+            assert_eq!(
+                ring_params.cipher_modulus(),
+                expand_coeff_params.cipher_modulus()
+            );
             assert_eq!(
                 ring_params.secret_key_type(),
                 expand_coeff_params.secret_key_type()
@@ -74,6 +89,7 @@ impl SsleParameters {
                 commit_params,
                 commit_message_length,
                 ring_params,
+                ggsw_params,
                 expand_coeff_params,
             }
         } else {
@@ -93,8 +109,17 @@ impl SsleParameters {
                 _ => unreachable!(),
             };
 
-            let ring_params =
-                CrtGgswParameters::new(4, 1024, &moduli, RingSecretKeyType::Ternary, 5.56, basis);
+            let ring_params = CrtGlweParameters::new(
+                4,
+                1024,
+                BarrettModulus::new(CommitModulus.value_unchecked() as CrtValueT),
+                BarrettModulus::new(2305843009213554689),
+                &moduli,
+                RingSecretKeyType::Ternary,
+                5.56,
+            );
+
+            let ggsw_params = CrtGgswParameters::with_glwe_params(&ring_params, basis);
 
             let basis = match party_count {
                 256 => BigUintApproxSignedBasis::new(&modulus, 19, Some(5), &rns_base),
@@ -109,7 +134,10 @@ impl SsleParameters {
 
             assert_eq!(ring_params.dimension(), expand_coeff_params.dimension());
             assert_eq!(ring_params.poly_length(), expand_coeff_params.poly_length());
-            assert_eq!(ring_params.modulus(), expand_coeff_params.modulus());
+            assert_eq!(
+                ring_params.cipher_modulus(),
+                expand_coeff_params.cipher_modulus()
+            );
             assert_eq!(
                 ring_params.secret_key_type(),
                 expand_coeff_params.secret_key_type()
@@ -119,6 +147,7 @@ impl SsleParameters {
                 commit_params,
                 commit_message_length,
                 ring_params,
+                ggsw_params,
                 expand_coeff_params,
             }
         }
@@ -132,8 +161,12 @@ impl SsleParameters {
         self.commit_message_length
     }
 
-    pub fn ring_params(&self) -> &CrtGgswParameters<u64, BarrettModulus<u64>> {
+    pub fn ring_params(&self) -> &CrtGlweParameters<CrtValueT, BarrettModulus<CrtValueT>> {
         &self.ring_params
+    }
+
+    pub fn ggsw_params(&self) -> &CrtGgswParameters<CrtValueT, BarrettModulus<CrtValueT>> {
+        &self.ggsw_params
     }
 
     pub fn expand_coeff_params(&self) -> &CrtGlevParameters<u64, BarrettModulus<u64>> {

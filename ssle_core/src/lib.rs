@@ -6,5 +6,6 @@ mod master_secret_key;
 
 pub use parameters::{CrtValueT, SsleParameters};
 
+pub use keygen::KeyGen;
 pub use master_public_key::MasterPublicKey;
 pub use master_secret_key::MasterSecretKey;
