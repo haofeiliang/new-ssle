@@ -8,8 +8,12 @@ use primus_rns::RNSBase;
 #[derive(Barrett)]
 #[modulus(u32, value = 12289)]
 pub struct CommitModulus;
+pub type CommitValueT = u32;
+
+pub type CommitTable = primus_ntt::Concrete32Table;
 
 pub type CrtValueT = u64;
+pub type CrtTable = primus_ntt::CrtConcrete64Table;
 
 /// Parameters for ssle.
 #[derive(Clone)]

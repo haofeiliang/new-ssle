@@ -7,17 +7,23 @@ edition = "2024"
 network = { path = "../network" }
 
 primus_integer = { workspace = true }
+primus_reduce = { workspace = true }
 primus_modulus = { workspace = true }
+primus_poly = { workspace = true }
 primus_decompose = { workspace = true }
 primus_ntt = { workspace = true }
 primus_rns = { workspace = true }
 primus_lattice = { workspace = true }
 primus_fhe_core = { workspace = true }
 
+tokio = { workspace = true }
 rand = { workspace = true }
 bytemuck = { workspace = true }
+bytes = { workspace = true }
 
 [dev-dependencies]
 mimalloc = "0.1.47"
 clap = { version = "4", features = ["derive"] }
 num_cpus = "1.0"
+crossbeam-channel = "0.5.15"
+rayon = { workspace = true }

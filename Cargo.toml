@@ -9,16 +9,18 @@ rand = "0.9"
 serde = { version = "1.0", features = ["derive"] }
 bytes = { version = "1", features = ["serde"] }
 bytemuck = "1.23"
-rayon = "1.10.0"
+rayon = "1.11.0"
 criterion = "0.7"
 
 primus_integer = { path = "../primus/primus_integer" }
-primus_fhe_core = { path = "../primus/primus_fhe_core" }
+primus_reduce = { path = "../primus/primus_reduce" }
 primus_modulus = { path = "../primus/primus_modulus" }
+primus_poly = { path = "../primus/primus_poly" }
 primus_decompose = { path = "../primus/primus_decompose" }
 primus_ntt = { path = "../primus/primus_ntt" }
 primus_rns = { path = "../primus/primus_rns" }
 primus_lattice = { path = "../primus/primus_lattice" }
+primus_fhe_core = { path = "../primus/primus_fhe_core" }
 
 
 [profile.dev]
