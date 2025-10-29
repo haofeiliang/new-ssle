@@ -9,6 +9,7 @@ network = { path = "../network" }
 primus_integer = { workspace = true }
 primus_reduce = { workspace = true }
 primus_modulus = { workspace = true }
+primus_distr = { workspace = true }
 primus_poly = { workspace = true }
 primus_decompose = { workspace = true }
 primus_ntt = { workspace = true }
@@ -27,3 +28,4 @@ clap = { version = "4", features = ["derive"] }
 num_cpus = "1.0"
 crossbeam-channel = "0.5.15"
 rayon = { workspace = true }
+itertools = { workspace = true }

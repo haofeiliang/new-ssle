@@ -92,7 +92,7 @@ impl Party {
         rng: &mut R,
     ) -> (
         NttRlweSecretKey<CommitValueT>,
-        NttRlwePublicKey<CommitValueT>,
+        NttRlwePublicKey<Vec<CommitValueT>>,
     )
     where
         R: rand::Rng + rand::CryptoRng,
