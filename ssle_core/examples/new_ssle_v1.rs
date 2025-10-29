@@ -134,7 +134,7 @@ fn sim_thfhe_decrypt(
     _party_count: usize,
     msk: &MasterSecretKey,
     params: &SsleParameters,
-    recv_commits: std::sync::mpsc::Receiver<Bytes>,
+    recv_commits: std::sync::mpsc::Receiver<Vec<CrtValueT>>,
     send_decrypted_commits: Vec<crossbeam_channel::Sender<Bytes>>,
 ) {
     if let Ok(encoded_commits_sum) = recv_commits.recv() {
@@ -194,7 +194,7 @@ fn party_operation(
     mpk: MasterPublicKey,
     eck: CoefficientExpansionKey,
     thread_count: usize,
-    send_commit_sum: Option<std::sync::mpsc::Sender<Bytes>>,
+    send_commit_sum: Option<std::sync::mpsc::Sender<Vec<CrtValueT>>>,
     recv_decrypted_commit: crossbeam_channel::Receiver<Bytes>,
 ) -> usize {
     let rng = &mut rand::rng();
@@ -214,6 +214,7 @@ fn party_operation(
 
     let table = party.table();
 
+    let commit_rlwe_len = poly_length * 2;
     let rns_poly_len = ring_params.rns_poly_len();
     let rns_glwe_len = ring_params.rns_glwe_len();
     let big_uint_poly_len = ring_params.big_uint_poly_len();
@@ -252,34 +253,32 @@ fn party_operation(
     }
 
     // Share commit and commit pk
-    let commit_bytes = Bytes::from_owner(commit.to_bytes());
-    let commit_bytes_count = commit_bytes.len();
-    let all_commit_bytes = BytesMut::zeroed(commit_bytes_count * party_count);
-    let all_commit_bytes = party.share(commit_bytes, all_commit_bytes);
-    let mut re_reandom_all_commit_bytes = BytesMut::zeroed(commit_bytes_count * party_count);
+    let mut all_commits: Vec<CommitValueT> = vec![0; commit_rlwe_len * party_count];
+    let mut re_random_all_commits: Vec<CommitValueT> = vec![0; commit_rlwe_len * party_count];
+    party.share_v2(commit.as_ref(), &mut all_commits);
 
     if party_id == 0 {
         println!("Party {party_id}: Start share pk.");
     }
 
-    let commit_pk_bytes = Bytes::from_owner(commit_pk.into_bytes());
-    let commit_pk_bytes_count = commit_pk_bytes.len();
-    let commit_pks_bytes = BytesMut::zeroed(commit_pk_bytes_count * party_count);
-    let commit_pks_bytes = party.share(commit_pk_bytes, commit_pks_bytes);
+    let mut all_commit_pks: Vec<CommitValueT> = vec![0; commit_rlwe_len * party_count];
+    party.share_v2(commit_pk.as_ref(), &mut all_commit_pks);
 
     if party_id == 0 {
         println!("Party {party_id}: Commit and commit pk shared.");
     }
 
-    let rotate_rgsw_bytes_count = rns_ggsw_len * <CrtValueT as ByteCount>::BYTES_COUNT;
-    let mut rotate_rgsw_bytes = BytesMut::zeroed(rotate_rgsw_bytes_count);
-    let all_rotate_rgsw_bytes = BytesMut::zeroed(rotate_rgsw_bytes_count * party_count);
+    let mut rotate_rgsw: Vec<CrtValueT> = vec![0; rns_ggsw_len];
+    let mut all_rotate_rgsw: Vec<CrtValueT> = vec![0; rns_ggsw_len * party_count];
 
     // Check random degree for rgsw
     let degree = rng.random_range(0..poly_length);
 
-    let rotate_rgsw = bytemuck::cast_slice_mut(rotate_rgsw_bytes.as_mut());
-    party.generate_rotate_rgsw_inplace(degree, &mut DcrtGgsw::new(ArrayBase(rotate_rgsw)), rng);
+    party.generate_rotate_rgsw_inplace(
+        degree,
+        &mut DcrtGgsw::new(ArrayBase(rotate_rgsw.as_mut())),
+        rng,
+    );
 
     // Generate ACC
     let mut acc: CrtGlwe<Vec<CrtValueT>> = CrtGlwe::zero(rns_glwe_len);
@@ -290,14 +289,13 @@ fn party_operation(
             poly.iter_mut().step_by(party_count).for_each(|v| *v = one);
         });
 
-    let all_rotate_rgsw_bytes = party.share(rotate_rgsw_bytes.freeze(), all_rotate_rgsw_bytes);
+    party.share_v2(rotate_rgsw.as_ref(), all_rotate_rgsw.as_mut());
 
     let mut temp_dcrt_glwe: DcrtGlwe<Vec<CrtValueT>> = DcrtGlwe::zero(rns_glwe_len);
 
-    for rotate_rgsw in all_rotate_rgsw_bytes.chunks_exact(rotate_rgsw_bytes_count) {
-        let rotate_rgsw_slice = bytemuck::cast_slice(rotate_rgsw);
+    for rotate_rgsw in all_rotate_rgsw.chunks_exact(rns_ggsw_len) {
         acc.mul_dcrt_ggsw_inplace(
-            &DcrtGgsw::new(ArrayBase(rotate_rgsw_slice)),
+            &DcrtGgsw::new(ArrayBase(rotate_rgsw)),
             &mut temp_dcrt_glwe,
             ggsw_params.basis(),
             table,
@@ -311,10 +309,9 @@ fn party_operation(
     let mut expand_result = vec![<CrtGlwe<Vec<CrtValueT>>>::zero(rns_glwe_len); party_count];
     let mut ntt_expand_result = vec![<DcrtGlwe<Vec<CrtValueT>>>::zero(rns_glwe_len); party_count];
 
-    let encode_commits_bytes_count = rns_glwe_len * <CrtValueT as ByteCount>::BYTES_COUNT * 2;
-    let mut encode_commits: BytesMut = BytesMut::zeroed(encode_commits_bytes_count);
-    let mut encode_commits_sum: BytesMut = BytesMut::zeroed(encode_commits_bytes_count);
-    let all_encode_commits: BytesMut = BytesMut::zeroed(encode_commits_bytes_count * party_count);
+    let mut encode_commits: Vec<CrtValueT> = vec![0; rns_glwe_len * 2];
+    let mut encode_commits_sum: Vec<CrtValueT> = vec![0; rns_glwe_len * 2];
+    let mut all_encode_commits: Vec<CrtValueT> = vec![0; rns_glwe_len * 2 * party_count];
 
     eck.expand_partial_coefficients_inplace(
         &acc,
@@ -331,18 +328,14 @@ fn party_operation(
             x.to_ntt_form_inplace(y, table);
         });
 
-    for (commit_bytes, commit_r_bytes, commit_pk_bytes) in izip!(
-        all_commit_bytes.chunks_exact(commit_bytes_count),
-        re_reandom_all_commit_bytes.chunks_exact_mut(commit_bytes_count),
-        commit_pks_bytes.chunks_exact(commit_pk_bytes_count),
+    for (commit, re_random_commit, commit_pk) in izip!(
+        all_commits.chunks_exact(rns_glwe_len),
+        re_random_all_commits.chunks_exact_mut(rns_glwe_len),
+        all_commit_pks.chunks_exact(rns_glwe_len),
     ) {
-        let x: &[CommitValueT] = bytemuck::cast_slice(commit_bytes);
-        let y: &mut [CommitValueT] = bytemuck::cast_slice_mut(commit_r_bytes);
-        let pk_slice: &[CommitValueT] = bytemuck::cast_slice(commit_pk_bytes);
-
-        let input = NttRlweCiphertext::new(ArrayBase(x));
-        let mut output = NttRlweCiphertext::new(ArrayBase(y));
-        let pk = NttRlweCiphertext::new(ArrayBase(pk_slice));
+        let input = NttRlweCiphertext::new(ArrayBase(commit));
+        let mut output = NttRlweCiphertext::new(ArrayBase(re_random_commit));
+        let pk = NttRlweCiphertext::new(ArrayBase(commit_pk));
 
         let pk = NttRlwePublicKey::from(pk);
         pk.encrypt_zeros_inplace(&mut output, commit_params, &commit_ntt_table, rng);
@@ -353,20 +346,17 @@ fn party_operation(
     let mut temp: Vec<CrtValueT> = vec![0; poly_length];
     let mut msg: DcrtPolynomial<Vec<CrtValueT>> = DcrtPolynomial::zero(poly_length);
 
-    let encode_commits_slice: &mut [CrtValueT] = bytemuck::cast_slice_mut(encode_commits.as_mut());
-
     izip!(
         ntt_expand_result.iter(),
-        re_reandom_all_commit_bytes.chunks_exact_mut(commit_bytes_count)
+        re_random_all_commits.chunks_exact_mut(rns_glwe_len)
     )
-    .for_each(|(selector, commit_bytes)| {
-        let commit_slice: &[CommitValueT] = bytemuck::cast_slice(commit_bytes);
-        let commit = NttRlweCiphertext::new(ArrayBase(commit_slice));
+    .for_each(|(selector, random_commit)| {
+        let random_commit = NttRlweCiphertext::new(ArrayBase(random_commit));
 
-        encode_commits_slice
+        encode_commits
             .chunks_exact_mut(rns_glwe_len)
-            .zip(commit.iter_ntt_poly(poly_length))
-            .for_each(|(ec, ntt_poly)| {
+            .zip(random_commit.iter_ntt_poly(poly_length))
+            .for_each(|(encode_commit, ntt_poly)| {
                 temp.iter_mut()
                     .zip(ntt_poly)
                     .for_each(|(x, y)| *x = *y as CrtValueT);
@@ -379,7 +369,7 @@ fn party_operation(
                         CommitModulus.value_unchecked().as_into(),
                     );
                 table.transform_slice(msg.as_mut());
-                DcrtGlwe::new(ArrayBase(ec)).add_dcrt_glwe_mul_dcrt_polynomial_assign(
+                DcrtGlwe::new(ArrayBase(encode_commit)).add_dcrt_glwe_mul_dcrt_polynomial_assign(
                     selector,
                     &DcrtPolynomial(ArrayBase(msg.as_ref())),
                     poly_length,
@@ -389,17 +379,13 @@ fn party_operation(
     });
 
     // Share commits
-    let all_encode_commits = party.share(encode_commits.freeze(), all_encode_commits);
+    party.share_v2(encode_commits.as_ref(), all_encode_commits.as_mut());
 
     all_encode_commits
-        .chunks_exact(encode_commits_bytes_count)
-        .for_each(|ec| {
-            let encode_commits_slice: &[CrtValueT] = bytemuck::cast_slice(ec);
-            let encode_commits_sum_slice: &mut [CrtValueT] =
-                bytemuck::cast_slice_mut(encode_commits_sum.as_mut());
-            encode_commits_slice
-                .chunks_exact(rns_glwe_len)
-                .zip(encode_commits_sum_slice.chunks_exact_mut(rns_glwe_len))
+        .chunks_exact(rns_glwe_len * 2)
+        .for_each(|ecs| {
+            ecs.chunks_exact(rns_glwe_len)
+                .zip(encode_commits_sum.chunks_exact_mut(rns_glwe_len))
                 .for_each(|(x, y)| {
                     DcrtGlwe::new(ArrayBase(y)).add_element_wise_assign(
                         &DcrtGlwe::new(ArrayBase(x)),
@@ -411,7 +397,7 @@ fn party_operation(
         });
 
     if let Some(send_commit_sum) = send_commit_sum {
-        send_commit_sum.send(encode_commits_sum.freeze()).unwrap();
+        send_commit_sum.send(encode_commits_sum).unwrap();
         drop(send_commit_sum);
     }
 
