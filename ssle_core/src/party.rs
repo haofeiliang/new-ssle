@@ -6,6 +6,7 @@ use network::{
     netio::{NetIO, Participant},
 };
 use primus_fhe_core::{NttRlwePublicKey, NttRlweSecretKey, RlweSecretKey};
+use primus_integer::UnsignedInteger;
 use tokio::runtime::Runtime;
 
 use crate::{CommitTable, CommitValueT, MasterPublicKey, SsleParameters};
@@ -124,5 +125,25 @@ impl Party {
             .unwrap();
 
         destination.freeze()
+    }
+
+    pub fn share_v2<T: UnsignedInteger>(&self, data: &[T], destination: &mut [T]) {
+        let chunk_size = data.len();
+
+        self.rt
+            .block_on(async {
+                for (i, chunk) in destination.chunks_exact_mut(chunk_size).enumerate() {
+                    if i as Id == self.party_id() {
+                        self.netio.broadcast(bytemuck::cast_slice(data)).await?;
+                        chunk.copy_from_slice(data);
+                    } else {
+                        self.netio
+                            .recv(i as Id, bytemuck::cast_slice_mut(chunk))
+                            .await?;
+                    }
+                }
+                Ok::<_, NetIoError>(())
+            })
+            .unwrap();
     }
 }
