@@ -4,17 +4,17 @@ use primus_fhe_core::{
     CrtGlweParameters, CrtGlweSecretKey, DcrtGlweCiphertext, DcrtGlweDecryptContext,
     DcrtGlweSecretKey,
 };
-use primus_ntt::{CrtConcrete64Table, Dcrt, DcrtTable};
+use primus_ntt::{Dcrt, DcrtTable};
 use primus_poly::{Data, DataMut, Polynomial, RawData};
 use primus_reduce::FieldContext;
 
-use crate::{CrtValueT, SsleParameters};
+use crate::{CrtTable, CrtValueT, SsleParameters};
 
 pub struct MasterSecretKey {
     sk: CrtGlweSecretKey<CrtValueT>,
     dcrt_sk: DcrtGlweSecretKey<CrtValueT>,
-    table: Arc<CrtConcrete64Table>,
-    params: SsleParameters,
+    table: Arc<CrtTable>,
+    params: Arc<SsleParameters>,
 }
 
 impl MasterSecretKey {
@@ -22,8 +22,8 @@ impl MasterSecretKey {
     pub fn new(
         sk: CrtGlweSecretKey<CrtValueT>,
         dcrt_sk: DcrtGlweSecretKey<CrtValueT>,
-        table: Arc<CrtConcrete64Table>,
-        params: SsleParameters,
+        table: Arc<CrtTable>,
+        params: Arc<SsleParameters>,
     ) -> Self {
         Self {
             sk,
@@ -45,7 +45,7 @@ impl MasterSecretKey {
         &self.params
     }
 
-    pub fn table(&self) -> &CrtConcrete64Table {
+    pub fn table(&self) -> &CrtTable {
         &self.table
     }
 

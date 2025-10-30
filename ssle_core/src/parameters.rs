@@ -75,19 +75,7 @@ impl SsleParameters {
                 _ => unreachable!(),
             };
 
-            let expand_coeff_params =
-                CrtGlevParameters::new(8, 512, &moduli, RingSecretKeyType::Ternary, 0.849, basis);
-
-            assert_eq!(ring_params.dimension(), expand_coeff_params.dimension());
-            assert_eq!(ring_params.poly_length(), expand_coeff_params.poly_length());
-            assert_eq!(
-                ring_params.cipher_modulus(),
-                expand_coeff_params.cipher_modulus()
-            );
-            assert_eq!(
-                ring_params.secret_key_type(),
-                expand_coeff_params.secret_key_type()
-            );
+            let expand_coeff_params = CrtGlevParameters::with_glwe_params(&ring_params, basis);
 
             Self {
                 commit_params,
@@ -133,19 +121,7 @@ impl SsleParameters {
                 _ => unreachable!(),
             };
 
-            let expand_coeff_params =
-                CrtGlevParameters::new(4, 1024, &moduli, RingSecretKeyType::Ternary, 5.56, basis);
-
-            assert_eq!(ring_params.dimension(), expand_coeff_params.dimension());
-            assert_eq!(ring_params.poly_length(), expand_coeff_params.poly_length());
-            assert_eq!(
-                ring_params.cipher_modulus(),
-                expand_coeff_params.cipher_modulus()
-            );
-            assert_eq!(
-                ring_params.secret_key_type(),
-                expand_coeff_params.secret_key_type()
-            );
+            let expand_coeff_params = CrtGlevParameters::with_glwe_params(&ring_params, basis);
 
             Self {
                 commit_params,

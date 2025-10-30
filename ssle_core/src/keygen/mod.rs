@@ -5,7 +5,7 @@ use primus_fhe_core::{
     DcrtGlwePublicKey, DcrtGlweSecretKey,
 };
 use primus_modulus::BarrettModulus;
-use primus_ntt::{CrtConcrete64Table, DcrtTable};
+use primus_ntt::DcrtTable;
 use primus_poly::{Data, DataMut, RawData};
 use primus_reduce::FieldContext;
 use primus_rns::RNSBase;
@@ -16,7 +16,7 @@ pub struct KeyGen;
 
 impl KeyGen {
     pub fn generate_keys<R>(
-        params: SsleParameters,
+        params: &Arc<SsleParameters>,
         rng: &mut R,
     ) -> (MasterSecretKey, MasterPublicKey, CoefficientExpansionKey)
     where
@@ -26,16 +26,15 @@ impl KeyGen {
         let poly_length = ring_params.poly_length();
 
         let table = Arc::new(
-            CrtConcrete64Table::new(poly_length.trailing_zeros(), ring_params.cipher_moduli())
-                .unwrap(),
+            CrtTable::new(poly_length.trailing_zeros(), ring_params.cipher_moduli()).unwrap(),
         );
-        let sk = { CrtGlweSecretKey::generate(&ring_params, rng) };
+        let sk = CrtGlweSecretKey::generate(&ring_params, rng);
         let dcrt_sk = DcrtGlweSecretKey::from_coeff_secret_key(&sk, table.as_ref());
 
         let pk = DcrtGlwePublicKey::new(&dcrt_sk, &ring_params, table.as_ref(), rng);
 
         let eck = CoefficientExpansionKey::new(
-            params.ggsw_params(),
+            params.expand_coeff_params(),
             &sk,
             &dcrt_sk,
             Arc::clone(&table),
@@ -43,8 +42,8 @@ impl KeyGen {
         );
 
         (
-            MasterSecretKey::new(sk, dcrt_sk, Arc::clone(&table), params.clone()),
-            MasterPublicKey::new(pk, table, params),
+            MasterSecretKey::new(sk, dcrt_sk, Arc::clone(&table), Arc::clone(params)),
+            MasterPublicKey::new(pk, table, Arc::clone(params)),
             eck,
         )
     }

@@ -2,23 +2,22 @@ use std::sync::Arc;
 
 use primus_fhe_core::DcrtGlwePublicKey;
 use primus_lattice::ggsw::DcrtGgsw;
-use primus_ntt::CrtConcrete64Table;
 use primus_poly::{DataMut, RawData};
 
-use crate::{CrtValueT, SsleParameters};
+use crate::{CrtTable, CrtValueT, SsleParameters};
 
 #[derive(Clone)]
 pub struct MasterPublicKey {
     pk: DcrtGlwePublicKey<CrtValueT>,
-    table: Arc<CrtConcrete64Table>,
-    params: SsleParameters,
+    table: Arc<CrtTable>,
+    params: Arc<SsleParameters>,
 }
 
 impl MasterPublicKey {
     pub fn new(
         pk: DcrtGlwePublicKey<CrtValueT>,
-        table: Arc<CrtConcrete64Table>,
-        params: SsleParameters,
+        table: Arc<CrtTable>,
+        params: Arc<SsleParameters>,
     ) -> Self {
         Self { pk, table, params }
     }
@@ -30,7 +29,7 @@ impl MasterPublicKey {
     }
 
     #[inline]
-    pub fn table(&self) -> &CrtConcrete64Table {
+    pub fn table(&self) -> &CrtTable {
         &self.table
     }
 

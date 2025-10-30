@@ -1,6 +1,7 @@
 // cargo run --release --package ssle_core --example new_ssle_v1 -- -t 1 -p 4
 
-use bytes::{Bytes, BytesMut};
+use std::sync::Arc;
+
 use clap::Parser;
 use itertools::izip;
 use mimalloc::MiMalloc;
@@ -9,7 +10,7 @@ use primus_fhe_core::{
     CrtGlweTraceContext, DcrtGlweCiphertext, DcrtGlweDecryptContext, NttRlweCiphertext,
     NttRlwePublicKey,
 };
-use primus_integer::{AsInto, ByteCount};
+use primus_integer::AsInto;
 use primus_lattice::{
     context::DcrtGlevContext,
     ggsw::DcrtGgsw,
@@ -71,17 +72,18 @@ fn main() {
     let args = Args::parse();
 
     let (party_count, thread_count, params) = check_args(args);
+    let params = Arc::new(params);
 
     let rng = &mut rand::rng();
 
     let participants = Participant::from_default(party_count, BASE_PORT);
 
-    let (msk, mpk, eck) = KeyGen::generate_keys(params.clone(), rng);
+    let (msk, mpk, eck) = KeyGen::generate_keys(&params, rng);
 
     println!("Key Generation done!");
 
     let (tx, recv_commits) = std::sync::mpsc::channel();
-    let mut send_decrypted_commits = Vec::with_capacity(party_count);
+    let mut final_commit_senders = Vec::with_capacity(party_count);
 
     let threads = (0..party_count as Id)
         .map(|party_id| {
@@ -93,8 +95,8 @@ fn main() {
             } else {
                 None
             };
-            let (send_decrypted_commit, recv_decrypted_commit) = crossbeam_channel::bounded(1);
-            send_decrypted_commits.push(send_decrypted_commit);
+            let (send_final_commit, recv_final_commit) = crossbeam_channel::bounded(1);
+            final_commit_senders.push(send_final_commit);
 
             std::thread::spawn(move || {
                 let threads_pool = rayon::ThreadPoolBuilder::new()
@@ -110,7 +112,7 @@ fn main() {
                         eck_c,
                         thread_count,
                         send_commit_sum,
-                        recv_decrypted_commit,
+                        recv_final_commit,
                     )
                 })
             })
@@ -124,7 +126,7 @@ fn main() {
         &msk,
         &params,
         recv_commits,
-        send_decrypted_commits,
+        final_commit_senders,
     );
 
     check_result(party_count, threads);
@@ -135,28 +137,26 @@ fn sim_thfhe_decrypt(
     msk: &MasterSecretKey,
     params: &SsleParameters,
     recv_commits: std::sync::mpsc::Receiver<Vec<CrtValueT>>,
-    send_decrypted_commits: Vec<crossbeam_channel::Sender<Bytes>>,
+    final_commit_senders: Vec<crossbeam_channel::Sender<Vec<CommitValueT>>>,
 ) {
-    if let Ok(encoded_commits_sum) = recv_commits.recv() {
-        let commit_params = params.commit_params();
-        let commit_poly_length = commit_params.poly_length();
+    if let Ok(encoded_commits) = recv_commits.recv() {
+        let commit_poly_length = params.commit_params().poly_length();
         let ring_params = params.ring_params();
 
-        let encoded_commits_sum_mid = encoded_commits_sum.len() / 2;
+        let mid = encoded_commits.len() / 2;
 
-        let mut commit_bytes: BytesMut =
-            BytesMut::zeroed(commit_poly_length * 2 * <CrtValueT as ByteCount>::BYTES_COUNT);
-        let mut context =
-            DcrtGlweDecryptContext::new(ring_params.cipher_moduli_count(), commit_poly_length);
-        let cipher_slice: &mut [CrtValueT] = bytemuck::cast_slice_mut(commit_bytes.as_mut());
+        let mut commit_data: Vec<CrtValueT> = vec![0; commit_poly_length * 2];
+        let mut context = DcrtGlweDecryptContext::new(
+            ring_params.cipher_moduli_count(),
+            ring_params.poly_length(),
+        );
 
-        for (poly, encoded_commit_chunk) in cipher_slice
+        for (poly, encoded_commit) in commit_data
             .chunks_mut(commit_poly_length)
-            .zip(encoded_commits_sum.chunks_exact(encoded_commits_sum_mid))
+            .zip(encoded_commits.chunks_exact(mid))
         {
-            let ec: &[CrtValueT] = bytemuck::cast_slice(encoded_commit_chunk);
             msk.decrypt_inplace(
-                &DcrtGlweCiphertext::new(ArrayBase(ec)),
+                &DcrtGlweCiphertext::new(ArrayBase(encoded_commit)),
                 &mut Polynomial(ArrayBase(poly)),
                 params.ring_params(),
                 msk.table(),
@@ -164,26 +164,11 @@ fn sim_thfhe_decrypt(
             );
         }
 
-        let decrypted_commit = if <CrtValueT as ByteCount>::BYTES_COUNT
-            != <CommitValueT as ByteCount>::BYTES_COUNT
-        {
-            let mut temp: BytesMut =
-                BytesMut::zeroed(commit_poly_length * 2 * <CommitValueT as ByteCount>::BYTES_COUNT);
+        let final_commit: Vec<CommitValueT> =
+            commit_data.into_iter().map(|v| v as CommitValueT).collect();
 
-            let x: &mut [CommitValueT] = bytemuck::cast_slice_mut(temp.as_mut());
-            let y: &[CrtValueT] = bytemuck::cast_slice(commit_bytes.as_ref());
-
-            x.iter_mut().zip(y.iter()).for_each(|(a, &b)| {
-                *a = b as CommitValueT;
-            });
-
-            temp.freeze()
-        } else {
-            commit_bytes.freeze()
-        };
-
-        for tx in send_decrypted_commits {
-            tx.send(decrypted_commit.clone()).unwrap();
+        for tx in final_commit_senders {
+            tx.send(final_commit.clone()).unwrap();
         }
     }
 }
@@ -195,18 +180,18 @@ fn party_operation(
     eck: CoefficientExpansionKey,
     thread_count: usize,
     send_commit_sum: Option<std::sync::mpsc::Sender<Vec<CrtValueT>>>,
-    recv_decrypted_commit: crossbeam_channel::Receiver<Bytes>,
+    recv_final_commit: crossbeam_channel::Receiver<Vec<CommitValueT>>,
 ) -> usize {
     let rng = &mut rand::rng();
 
     let party_count = participants.len();
     let party = Party::new(party_id, participants, mpk, thread_count);
 
-    let params = party.params();
-    let commit_params = params.commit_params();
-    let ring_params = params.ring_params();
-    let ggsw_params = params.ggsw_params();
-    let expand_coeff_params = params.expand_coeff_params();
+    let ssle_params = party.params();
+    let commit_params = ssle_params.commit_params();
+    let ring_params = ssle_params.ring_params();
+    let ggsw_params = ssle_params.ggsw_params();
+    let expand_coeff_params = ssle_params.expand_coeff_params();
 
     let poly_length = commit_params.poly_length();
 
@@ -223,7 +208,7 @@ fn party_operation(
     let mut external_product_context =
         DcrtGlevContext::new(poly_length, rns_poly_len, big_uint_poly_len);
 
-    let mut expand_context = CrtGlweTraceContext::new(
+    let mut expand_coeff_context = CrtGlweTraceContext::new(
         expand_coeff_params.dimension(),
         poly_length,
         rns_poly_len,
@@ -248,21 +233,22 @@ fn party_operation(
 
     commit.mul_scalar_assign(inv_party_count, CommitModulus);
 
+    // Share commit and commit pk
+    let mut all_commits: Vec<CommitValueT> = vec![0; commit_rlwe_len * party_count];
+    let mut all_commit_pks: Vec<CommitValueT> = vec![0; commit_rlwe_len * party_count];
+    let mut re_random_all_commits: Vec<CommitValueT> = vec![0; commit_rlwe_len * party_count];
+
     if party_id == 0 {
         println!("Party {party_id}: Start share commit.");
     }
 
-    // Share commit and commit pk
-    let mut all_commits: Vec<CommitValueT> = vec![0; commit_rlwe_len * party_count];
-    let mut re_random_all_commits: Vec<CommitValueT> = vec![0; commit_rlwe_len * party_count];
-    party.share_v2(commit.as_ref(), &mut all_commits);
+    party.share_v2(commit.as_ref(), all_commits.as_mut_slice());
 
     if party_id == 0 {
         println!("Party {party_id}: Start share pk.");
     }
 
-    let mut all_commit_pks: Vec<CommitValueT> = vec![0; commit_rlwe_len * party_count];
-    party.share_v2(commit_pk.as_ref(), &mut all_commit_pks);
+    party.share_v2(commit_pk.as_ref(), all_commit_pks.as_mut_slice());
 
     if party_id == 0 {
         println!("Party {party_id}: Commit and commit pk shared.");
@@ -318,7 +304,7 @@ fn party_operation(
         &mut expand_result,
         &expand_coeff_params,
         ring_params.base_q(),
-        &mut expand_context,
+        &mut expand_coeff_context,
     );
 
     expand_result
@@ -401,10 +387,9 @@ fn party_operation(
         drop(send_commit_sum);
     }
 
-    if let Ok(decrypted_commit) = recv_decrypted_commit.recv() {
-        let cipher_slice: &[CommitValueT] = bytemuck::cast_slice(decrypted_commit.as_ref());
+    if let Ok(final_commit) = recv_final_commit.recv() {
         let msgs = commit_sk.decrypt(
-            &NttRlweCiphertext::new(ArrayBase(cipher_slice)),
+            &NttRlweCiphertext::new(ArrayBase(final_commit.as_ref())),
             commit_params,
             &commit_ntt_table,
         );
