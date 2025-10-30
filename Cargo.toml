@@ -16,6 +16,7 @@ criterion = "0.7"
 primus_integer = { path = "../primus/primus_integer" }
 primus_reduce = { path = "../primus/primus_reduce" }
 primus_modulus = { path = "../primus/primus_modulus" }
+primus_factor = { path = "../primus/primus_factor" }
 primus_poly = { path = "../primus/primus_poly" }
 primus_distr = { path = "../primus/primus_distr" }
 primus_decompose = { path = "../primus/primus_decompose" }

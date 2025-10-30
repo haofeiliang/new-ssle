@@ -1,4 +1,5 @@
 // cargo run --release --package ssle_core --example new_ssle_v1 -- -t 1 -p 4
+// cargo +nightly run --release --package ssle_core --example new_ssle_v1 --features="nightly" -- -t 1 -p 4
 
 use std::sync::Arc;
 
@@ -8,7 +9,7 @@ use mimalloc::MiMalloc;
 use network::{Id, netio::Participant};
 use primus_fhe_core::{
     CrtGlweTraceContext, DcrtGlweCiphertext, DcrtGlweDecryptContext, NttRlweCiphertext,
-    NttRlwePublicKey,
+    NttRlwePublicKey, RlweCiphertext,
 };
 use primus_integer::AsInto;
 use primus_lattice::{
@@ -16,8 +17,8 @@ use primus_lattice::{
     ggsw::DcrtGgsw,
     glwe::{CrtGlwe, DcrtGlwe},
 };
-use primus_ntt::{Dcrt, NttTable};
-use primus_poly::{ArrayBase, Polynomial, dcrt::DcrtPolynomial};
+use primus_ntt::{Dcrt, Ntt, NttTable};
+use primus_poly::{ArrayBase, NttPolynomial, Polynomial, PolynomialOwned, dcrt::DcrtPolynomial};
 use primus_reduce::Modulus;
 use primus_reduce::ops::*;
 use rand::Rng;
@@ -25,6 +26,12 @@ use ssle_core::{
     CoefficientExpansionKey, CommitModulus, CommitTable, CommitValueT, CrtValueT, KeyGen,
     MasterPublicKey, MasterSecretKey, Party, SsleParameters,
 };
+
+#[cfg(feature = "gt128")]
+const GT128: bool = true;
+
+#[cfg(not(feature = "gt128"))]
+const GT128: bool = false;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -60,7 +67,21 @@ fn check_args(args: Args) -> (usize, usize, SsleParameters) {
         None => 2,
     };
 
-    let params = SsleParameters::new(party_count);
+    let params = if party_count <= 128 {
+        if !GT128 {
+            SsleParameters::new(party_count)
+        } else {
+            panic!("Don't enable feature `gt128` for party count: {party_count}<=128!")
+        }
+    } else if party_count > 128 && party_count <= 2048 {
+        if GT128 {
+            SsleParameters::new(party_count)
+        } else {
+            panic!("Enable feature `gt128` for party count: {party_count}!")
+        }
+    } else {
+        panic!("no preparation for party count lager than 2048!")
+    };
 
     println!("Party count: {party_count}");
     println!("Thread count per party: {thread_count}");
@@ -88,6 +109,7 @@ fn main() {
     let threads = (0..party_count as Id)
         .map(|party_id| {
             let participants_c = participants.clone();
+            let msk_c = msk.clone();
             let mpk_c = mpk.clone();
             let eck_c = eck.clone();
             let send_commit_sum = if party_id == 0 {
@@ -108,6 +130,7 @@ fn main() {
                     party_operation(
                         party_id,
                         participants_c,
+                        msk_c,
                         mpk_c,
                         eck_c,
                         thread_count,
@@ -164,8 +187,10 @@ fn sim_thfhe_decrypt(
             );
         }
 
-        let final_commit: Vec<CommitValueT> =
-            commit_data.into_iter().map(|v| v as CommitValueT).collect();
+        let final_commit: Vec<CommitValueT> = commit_data
+            .into_iter()
+            .map(|v| v.try_into().unwrap())
+            .collect();
 
         for tx in final_commit_senders {
             tx.send(final_commit.clone()).unwrap();
@@ -176,6 +201,7 @@ fn sim_thfhe_decrypt(
 fn party_operation(
     party_id: Id,
     participants: Vec<Participant>,
+    msk: MasterSecretKey,
     mpk: MasterPublicKey,
     eck: CoefficientExpansionKey,
     thread_count: usize,
@@ -221,17 +247,20 @@ fn party_operation(
     let (commit_sk, commit_pk) = party.generate_commit_key_pair(&commit_ntt_table, rng);
 
     // Generate commit
-    let mut commit = commit_sk.encrypt_zeros(commit_params, &commit_ntt_table, rng);
+    let commit = commit_sk.encrypt_zeros(commit_params, &commit_ntt_table, rng);
 
     // Check commit
     let decrypt_commit = commit_sk.decrypt(&commit, &commit_params, &commit_ntt_table);
     assert!(decrypt_commit.iter().copied().all(|v| v == 0));
 
-    let inv_party_count = commit_params
-        .cipher_modulus()
-        .reduce_inv(party_count.as_into());
+    let commit = commit.into_coeff_form(&commit_ntt_table);
 
-    commit.mul_scalar_assign(inv_party_count, CommitModulus);
+    // let inv_party_count = commit_params
+    //     .cipher_modulus()
+    //     .reduce_inv(party_count.as_into());
+    // let inv_party_count_factor = ShoupFactor::new(inv_party_count, CommitModulus.value_unchecked());
+
+    // commit.mul_factor_assign(inv_party_count_factor, CommitModulus.value_unchecked());
 
     // Share commit and commit pk
     let mut all_commits: Vec<CommitValueT> = vec![0; commit_rlwe_len * party_count];
@@ -293,10 +322,10 @@ fn party_operation(
     }
 
     let mut expand_result = vec![<CrtGlwe<Vec<CrtValueT>>>::zero(rns_glwe_len); party_count];
-    let mut ntt_expand_result = vec![<DcrtGlwe<Vec<CrtValueT>>>::zero(rns_glwe_len); party_count];
+    let mut selectors = vec![<DcrtGlwe<Vec<CrtValueT>>>::zero(rns_glwe_len); party_count];
 
     let mut encode_commits: Vec<CrtValueT> = vec![0; rns_glwe_len * 2];
-    let mut encode_commits_sum: Vec<CrtValueT> = vec![0; rns_glwe_len * 2];
+    let mut final_encode_commits: Vec<CrtValueT> = vec![0; rns_glwe_len * 2];
     let mut all_encode_commits: Vec<CrtValueT> = vec![0; rns_glwe_len * 2 * party_count];
 
     eck.expand_partial_coefficients_inplace(
@@ -309,42 +338,63 @@ fn party_operation(
 
     expand_result
         .iter()
-        .zip(ntt_expand_result.iter_mut())
+        .zip(selectors.iter_mut())
         .for_each(|(x, y)| {
             x.to_ntt_form_inplace(y, table);
         });
 
+    // for (i, selector) in selectors.iter().enumerate() {
+    //     let mut decrypt_context =
+    //         DcrtGlweDecryptContext::new(ring_params.cipher_moduli_count(), poly_length);
+    //     let m_dec = msk.decrypt(selector, ring_params, table, &mut decrypt_context);
+    //     if m_dec.as_ref().iter().any(|&v| v != 0) {
+    //         println!("Party {party_id}: [{i}] : {:?}", m_dec.as_slice());
+    //     }
+    // }
+
     for (commit, re_random_commit, commit_pk) in izip!(
-        all_commits.chunks_exact(rns_glwe_len),
-        re_random_all_commits.chunks_exact_mut(rns_glwe_len),
-        all_commit_pks.chunks_exact(rns_glwe_len),
+        all_commits.chunks_exact(commit_rlwe_len),
+        re_random_all_commits.chunks_exact_mut(commit_rlwe_len),
+        all_commit_pks.chunks_exact(commit_rlwe_len),
     ) {
-        let input = NttRlweCiphertext::new(ArrayBase(commit));
-        let mut output = NttRlweCiphertext::new(ArrayBase(re_random_commit));
+        let input = RlweCiphertext::new(ArrayBase(commit));
+        let mut output = NttRlweCiphertext::new(ArrayBase(&mut *re_random_commit));
         let pk = NttRlweCiphertext::new(ArrayBase(commit_pk));
 
         let pk = NttRlwePublicKey::from(pk);
         pk.encrypt_zeros_inplace(&mut output, commit_params, &commit_ntt_table, rng);
 
-        output.add_element_wise_assign(&input, CommitModulus);
+        // let m_dec = commit_sk.decrypt(&output, commit_params, &commit_ntt_table);
+        // if m_dec.as_ref().iter().all(|&v| v == 0) {
+        //     println!("Party {party_id}: {i}");
+        // }
+
+        re_random_commit
+            .chunks_exact_mut(poly_length)
+            .for_each(|poly| {
+                commit_ntt_table.inverse_transform_slice(poly);
+            });
+
+        RlweCiphertext::new(ArrayBase(re_random_commit))
+            .add_element_wise_assign(&input, CommitModulus);
     }
 
     let mut temp: Vec<CrtValueT> = vec![0; poly_length];
-    let mut msg: DcrtPolynomial<Vec<CrtValueT>> = DcrtPolynomial::zero(poly_length);
+    let mut msg: DcrtPolynomial<Vec<CrtValueT>> = DcrtPolynomial::zero(rns_poly_len);
 
     izip!(
-        ntt_expand_result.iter(),
-        re_random_all_commits.chunks_exact_mut(rns_glwe_len)
+        selectors.iter(),
+        re_random_all_commits.chunks_exact_mut(commit_rlwe_len)
     )
-    .for_each(|(selector, random_commit)| {
-        let random_commit = NttRlweCiphertext::new(ArrayBase(random_commit));
+    .for_each(|(selector, random_commit_slice)| {
+        let random_commit = RlweCiphertext::new(ArrayBase(random_commit_slice));
 
         encode_commits
             .chunks_exact_mut(rns_glwe_len)
-            .zip(random_commit.iter_ntt_poly(poly_length))
-            .for_each(|(encode_commit, ntt_poly)| {
+            .zip(random_commit.iter_poly(poly_length))
+            .for_each(|(encode_commit, poly)| {
                 temp.iter_mut()
-                    .zip(ntt_poly)
+                    .zip(poly)
                     .for_each(|(x, y)| *x = *y as CrtValueT);
                 ring_params
                     .base_q()
@@ -364,6 +414,43 @@ fn party_operation(
             });
     });
 
+    let mut temp_commit: Vec<CommitValueT> = vec![0; poly_length * 2];
+    let mut temp_crt: Vec<CrtValueT> = vec![0; poly_length * 2];
+    let mut decrypt_context =
+        DcrtGlweDecryptContext::new(ring_params.cipher_moduli_count(), poly_length);
+    izip!(
+        encode_commits.chunks_exact_mut(rns_glwe_len),
+        temp_crt.chunks_exact_mut(poly_length),
+        temp_commit.chunks_exact_mut(poly_length),
+    )
+    .for_each(|(ec, cpoly, commit_poly)| {
+        msk.decrypt_inplace(
+            &DcrtGlwe::new(ArrayBase(ec)),
+            &mut Polynomial(ArrayBase(&mut *cpoly)),
+            ring_params,
+            table,
+            &mut decrypt_context,
+        );
+        commit_poly
+            .iter_mut()
+            .zip(cpoly.iter())
+            .for_each(|(x, &y)| {
+                *x = y.try_into().unwrap();
+            });
+    });
+    temp_commit.chunks_exact_mut(poly_length).for_each(|poly| {
+        commit_ntt_table.transform_slice(poly);
+        // poly.iter_mut()
+        //     .for_each(|value| CommitModulus.reduce_mul_assign(value, 4));
+    });
+    let msgs = commit_sk.decrypt(
+        &NttRlweCiphertext::new(ArrayBase(temp_commit.as_ref())),
+        commit_params,
+        &commit_ntt_table,
+    );
+
+    println!("Party {party_id}: {:?}", msgs.as_ref());
+
     // Share commits
     party.share_v2(encode_commits.as_ref(), all_encode_commits.as_mut());
 
@@ -371,7 +458,7 @@ fn party_operation(
         .chunks_exact(rns_glwe_len * 2)
         .for_each(|ecs| {
             ecs.chunks_exact(rns_glwe_len)
-                .zip(encode_commits_sum.chunks_exact_mut(rns_glwe_len))
+                .zip(final_encode_commits.chunks_exact_mut(rns_glwe_len))
                 .for_each(|(x, y)| {
                     DcrtGlwe::new(ArrayBase(y)).add_element_wise_assign(
                         &DcrtGlwe::new(ArrayBase(x)),
@@ -383,18 +470,31 @@ fn party_operation(
         });
 
     if let Some(send_commit_sum) = send_commit_sum {
-        send_commit_sum.send(encode_commits_sum).unwrap();
+        send_commit_sum.send(final_encode_commits).unwrap();
         drop(send_commit_sum);
     }
 
-    if let Ok(final_commit) = recv_final_commit.recv() {
+    if let Ok(mut final_commit) = recv_final_commit.recv() {
+        let mut temp = PolynomialOwned::zero(poly_length);
+        temp.iter_mut().step_by(party_count).for_each(|v| *v = 1);
+        commit_ntt_table.transform_slice(temp.as_mut());
+
+        let p = NttPolynomial(ArrayBase(temp.as_mut()))
+            .try_inv(CommitModulus)
+            .unwrap();
+
+        final_commit.chunks_exact_mut(poly_length).for_each(|poly| {
+            commit_ntt_table.transform_slice(poly);
+            NttPolynomial(ArrayBase(poly)).mul_assign(&p, CommitModulus);
+        });
+
         let msgs = commit_sk.decrypt(
             &NttRlweCiphertext::new(ArrayBase(final_commit.as_ref())),
             commit_params,
             &commit_ntt_table,
         );
 
-        println!("Party {party_id}: {:?}", msgs.as_ref());
+        // println!("Party {party_id}: {:?}", msgs.as_ref());
 
         let is_leader = msgs.iter().all(|&v| v == 0);
 

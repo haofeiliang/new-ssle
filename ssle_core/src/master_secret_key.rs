@@ -10,6 +10,7 @@ use primus_reduce::FieldContext;
 
 use crate::{CrtTable, CrtValueT, SsleParameters};
 
+#[derive(Clone)]
 pub struct MasterSecretKey {
     sk: CrtGlweSecretKey<CrtValueT>,
     dcrt_sk: DcrtGlweSecretKey<CrtValueT>,
@@ -64,5 +65,20 @@ impl MasterSecretKey {
     {
         self.dcrt_sk
             .decrypt_inplace(ciphertext, msg, params, table, context)
+    }
+
+    pub fn decrypt<M, Table, A>(
+        &self,
+        ciphertext: &DcrtGlweCiphertext<A>,
+        params: &CrtGlweParameters<CrtValueT, M>,
+        table: &Table,
+        context: &mut DcrtGlweDecryptContext<CrtValueT>,
+    ) -> primus_poly::PolynomialOwned<CrtValueT>
+    where
+        M: FieldContext<CrtValueT>,
+        Table: DcrtTable<ValueT = CrtValueT> + Dcrt,
+        A: RawData<Elem = CrtValueT> + Data,
+    {
+        self.dcrt_sk.decrypt(ciphertext, params, table, context)
     }
 }

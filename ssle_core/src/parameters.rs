@@ -5,9 +5,16 @@ use primus_fhe_core::{
 use primus_modulus::{Barrett, BarrettModulus, integer::multiply_many_values, reduce::Modulus};
 use primus_rns::RNSBase;
 
+#[cfg(feature = "gt128")]
+#[derive(Barrett)]
+#[modulus(u32, value = 40961)]
+pub struct CommitModulus;
+
+#[cfg(not(feature = "gt128"))]
 #[derive(Barrett)]
 #[modulus(u32, value = 12289)]
 pub struct CommitModulus;
+
 pub type CommitValueT = u32;
 
 pub type CommitTable = primus_ntt::Concrete32Table;
@@ -25,7 +32,48 @@ pub struct SsleParameters {
     expand_coeff_params: CrtGlevParameters<CrtValueT, BarrettModulus<CrtValueT>>,
 }
 
+const GAMMA: CrtValueT = 140737488273409;
+
 impl SsleParameters {
+    pub fn for_test(party_count: usize) -> Self {
+        assert!(party_count.is_power_of_two() && party_count >= 2 && party_count <= 2048);
+
+        let commit_message_length = 60;
+
+        let commit_params =
+            RlweParameters::new(512, 2, CommitModulus, RingSecretKeyType::Ternary, 3.19);
+
+        let rns_moduli: [CrtValueT; 2] = [1125899906826241, 1125899906629633];
+
+        let moduli = rns_moduli.map(BarrettModulus::new).to_vec();
+        let rns_base = RNSBase::new(&moduli).unwrap();
+        let modulus = rns_base.moduli_product().to_vec();
+
+        let ring_params = CrtGlweParameters::new(
+            8,
+            512,
+            BarrettModulus::new(CommitModulus.value_unchecked() as CrtValueT),
+            BarrettModulus::new(GAMMA),
+            &moduli,
+            RingSecretKeyType::Ternary,
+            0.849,
+        );
+
+        let basis = BigUintApproxSignedBasis::new(&modulus, 25, Some(3), &rns_base);
+
+        let ggsw_params = CrtGgswParameters::with_glwe_params(&ring_params, basis.clone());
+
+        let expand_coeff_params = CrtGlevParameters::with_glwe_params(&ring_params, basis);
+
+        Self {
+            commit_params,
+            commit_message_length,
+            ring_params,
+            ggsw_params,
+            expand_coeff_params,
+        }
+    }
+
     pub fn new(party_count: usize) -> Self {
         assert!(party_count.is_power_of_two() && party_count >= 2 && party_count <= 2048);
 
@@ -56,7 +104,7 @@ impl SsleParameters {
                 8,
                 512,
                 BarrettModulus::new(CommitModulus.value_unchecked() as CrtValueT),
-                BarrettModulus::new(2305843009213554689),
+                BarrettModulus::new(GAMMA),
                 &moduli,
                 RingSecretKeyType::Ternary,
                 0.849,
@@ -85,13 +133,34 @@ impl SsleParameters {
                 expand_coeff_params,
             }
         } else {
-            let commit_params =
-                RlweParameters::new(1024, 2, CommitModulus, RingSecretKeyType::Ternary, 0.849);
+            let poly_length = match party_count {
+                256 | 512 => 512,
+                1024 => 1024,
+                2048 => 2048,
+                _ => unreachable!(),
+            };
+
+            let commit_params = RlweParameters::new(
+                poly_length,
+                2,
+                CommitModulus,
+                RingSecretKeyType::Ternary,
+                0.849,
+            );
 
             let rns_moduli: [CrtValueT; 3] = [137438822401, 68719403009, 68719230977];
             let modulus = multiply_many_values(&rns_moduli);
             let moduli = rns_moduli.map(BarrettModulus::new).to_vec();
             let rns_base = RNSBase::new(&moduli).unwrap();
+
+            let poly_length = match party_count {
+                256 | 512 => 512,
+                1024 => 1024,
+                2048 => 2048,
+                _ => unreachable!(),
+            };
+
+            let dimmension = 4096 / poly_length;
 
             let basis = match party_count {
                 256 => BigUintApproxSignedBasis::new(&modulus, 17, Some(5), &rns_base),
@@ -102,10 +171,10 @@ impl SsleParameters {
             };
 
             let ring_params = CrtGlweParameters::new(
-                4,
-                1024,
+                dimmension,
+                poly_length,
                 BarrettModulus::new(CommitModulus.value_unchecked() as CrtValueT),
-                BarrettModulus::new(2305843009213554689),
+                BarrettModulus::new(GAMMA),
                 &moduli,
                 RingSecretKeyType::Ternary,
                 5.56,
