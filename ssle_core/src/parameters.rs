@@ -32,7 +32,7 @@ pub struct SsleParameters {
     expand_coeff_params: CrtGlevParameters<CrtValueT, BarrettModulus<CrtValueT>>,
 }
 
-const GAMMA: CrtValueT = 140737488273409;
+const GAMMA: CrtValueT = 2056193;
 
 impl SsleParameters {
     pub fn for_test(party_count: usize) -> Self {

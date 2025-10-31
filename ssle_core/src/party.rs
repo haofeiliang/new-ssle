@@ -147,10 +147,10 @@ impl Party {
             .unwrap();
     }
 
-    pub fn share_v3<I: AsRef<[T]>, O: AsMut<[T]>, T: UnsignedInteger>(
+    pub fn share_v3<I: AsRef<[T]> + AsMut<[T]>, T: UnsignedInteger>(
         &self,
         data: &I,
-        result: &mut [O],
+        result: &mut [I],
     ) {
         let data: &[T] = data.as_ref();
         let data_bytes: &[u8] = bytemuck::cast_slice(data);
