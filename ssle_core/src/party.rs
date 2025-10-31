@@ -146,4 +146,29 @@ impl Party {
             })
             .unwrap();
     }
+
+    pub fn share_v3<I: AsRef<[T]>, O: AsMut<[T]>, T: UnsignedInteger>(
+        &self,
+        data: &I,
+        result: &mut [O],
+    ) {
+        let data: &[T] = data.as_ref();
+        let data_bytes: &[u8] = bytemuck::cast_slice(data);
+
+        self.rt
+            .block_on(async {
+                for (i, chunk) in result.iter_mut().enumerate() {
+                    if i as Id == self.party_id() {
+                        self.netio.broadcast(data_bytes).await?;
+                        chunk.as_mut().copy_from_slice(data);
+                    } else {
+                        self.netio
+                            .recv(i as Id, bytemuck::cast_slice_mut(chunk.as_mut()))
+                            .await?;
+                    }
+                }
+                Ok::<_, NetIoError>(())
+            })
+            .unwrap();
+    }
 }

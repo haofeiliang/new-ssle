@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use primus_fhe_core::DcrtGlwePublicKey;
+use primus_fhe_core::{DcrtGlwePublicKey, NttRlwePublicKey, NttRlweSecretKey, RlweSecretKey};
 use primus_lattice::ggsw::DcrtGgsw;
 use primus_poly::{DataMut, RawData};
 
-use crate::{CrtTable, CrtValueT, SsleParameters};
+use crate::{CommitTable, CommitValueT, CrtTable, CrtValueT, SsleParameters};
 
 #[derive(Clone)]
 pub struct MasterPublicKey {
@@ -78,6 +78,26 @@ impl MasterPublicKey {
             self.table.as_ref(),
             rng,
         );
+    }
+
+    pub fn generate_commit_key_pair<R>(
+        &self,
+        ntt_table: &CommitTable,
+        rng: &mut R,
+    ) -> (
+        NttRlweSecretKey<CommitValueT>,
+        NttRlwePublicKey<Vec<CommitValueT>>,
+    )
+    where
+        R: rand::Rng + rand::CryptoRng,
+    {
+        let commit_params = self.commit_params();
+
+        let commit_sk = RlweSecretKey::generate(commit_params, rng);
+        let commit_sk = NttRlweSecretKey::from_coeff_secret_key(&commit_sk, ntt_table);
+        let commit_pk = NttRlwePublicKey::new(&commit_sk, commit_params, ntt_table, rng);
+
+        (commit_sk, commit_pk)
     }
 
     pub fn ring_params(
