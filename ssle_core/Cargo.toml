@@ -26,10 +26,12 @@ bytes = { workspace = true }
 [dev-dependencies]
 mimalloc = "0.1.47"
 clap = { version = "4", features = ["derive"] }
-num_cpus = "1.0"
+num_cpus = "1"
 crossbeam-channel = "0.5.15"
 rayon = { workspace = true }
 itertools = { workspace = true }
+tabled = "0.20"
+quanta = "0.12"
 
 [features]
 gt128 = []

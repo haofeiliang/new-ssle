@@ -7,9 +7,10 @@ use network::{
 };
 use primus_fhe_core::{NttRlwePublicKey, NttRlweSecretKey, RlweSecretKey};
 use primus_integer::UnsignedInteger;
+use primus_lattice::glwe::CrtGlwe;
 use tokio::runtime::Runtime;
 
-use crate::{CommitTable, CommitValueT, MasterPublicKey, SsleParameters};
+use crate::{CommitTable, CommitValueT, CrtValueT, MasterPublicKey, SsleParameters};
 
 pub struct Party {
     mpk: MasterPublicKey,
@@ -105,6 +106,23 @@ impl Party {
         let commit_pk = NttRlwePublicKey::new(&commit_sk, commit_params, ntt_table, rng);
 
         (commit_sk, commit_pk)
+    }
+
+    pub fn generate_init_acc(&self) -> CrtGlwe<Vec<CrtValueT>> {
+        let ring_params = self.mpk.ring_params();
+        let poly_length = ring_params.poly_length();
+        let rns_glwe_len = ring_params.rns_glwe_len();
+        let num_parties = self.num_parties();
+
+        let mut acc: CrtGlwe<Vec<CrtValueT>> = CrtGlwe::zero(rns_glwe_len);
+        let (_, b) = acc.a_b_mut_slices(ring_params.rns_glwe_mid());
+        b.chunks_exact_mut(poly_length)
+            .zip(ring_params.delta_mod_q())
+            .for_each(|(poly, &one)| {
+                poly.iter_mut().step_by(num_parties).for_each(|v| *v = one);
+            });
+
+        acc
     }
 
     pub fn share(&self, data: Bytes, mut destination: BytesMut) -> Bytes {
