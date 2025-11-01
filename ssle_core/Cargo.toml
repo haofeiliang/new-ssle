@@ -33,4 +33,8 @@ itertools = { workspace = true }
 
 [features]
 gt128 = []
-nightly = []
+nightly = [
+    "primus_ntt/nightly",
+    "primus_lattice/nightly",
+    "primus_fhe_core/nightly",
+]

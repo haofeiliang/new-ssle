@@ -1,5 +1,7 @@
 // cargo run --release --package ssle_core --example new_ssle_v2 -- -t 1 -p 4
+// cargo run --release --package ssle_core --example new_ssle_v2 --features="gt128" -- -t 1 -p 256
 // cargo +nightly run --release --package ssle_core --example new_ssle_v2 --features="nightly" -- -t 1 -p 4
+// cargo +nightly run --release --package ssle_core --example new_ssle_v2 --features="nightly gt128" -- -t 1 -p 256
 
 use std::sync::Arc;
 
