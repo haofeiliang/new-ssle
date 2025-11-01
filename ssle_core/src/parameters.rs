@@ -68,10 +68,20 @@ impl SsleParameters {
                 BarrettModulus::new(GAMMA),
                 &moduli,
                 RingSecretKeyType::Ternary,
+                (0.849 * 0.849 * (party_count as f64)).sqrt(),
+            );
+
+            let basic_ring_params = CrtGlweParameters::new(
+                8,
+                512,
+                BarrettModulus::new(CommitModulus.value_unchecked() as CrtValueT),
+                BarrettModulus::new(GAMMA),
+                &moduli,
+                RingSecretKeyType::Ternary,
                 0.849,
             );
 
-            let ggsw_params = CrtGgswParameters::with_glwe_params(&ring_params, basis);
+            let ggsw_params = CrtGgswParameters::with_glwe_params(&basic_ring_params, basis);
 
             let basis = match party_count {
                 2 => BigUintApproxSignedBasis::new(&modulus, 34, Some(2), &rns_base),
@@ -84,7 +94,8 @@ impl SsleParameters {
                 _ => unreachable!(),
             };
 
-            let expand_coeff_params = CrtGlevParameters::with_glwe_params(&ring_params, basis);
+            let expand_coeff_params =
+                CrtGlevParameters::with_glwe_params(&basic_ring_params, basis);
 
             Self {
                 commit_params,
@@ -138,10 +149,20 @@ impl SsleParameters {
                 BarrettModulus::new(GAMMA),
                 &moduli,
                 RingSecretKeyType::Ternary,
+                (0.849 * 0.849 * (party_count as f64)).sqrt(),
+            );
+
+            let basic_ring_params = CrtGlweParameters::new(
+                dimmension,
+                poly_length,
+                BarrettModulus::new(CommitModulus.value_unchecked() as CrtValueT),
+                BarrettModulus::new(GAMMA),
+                &moduli,
+                RingSecretKeyType::Ternary,
                 5.56,
             );
 
-            let ggsw_params = CrtGgswParameters::with_glwe_params(&ring_params, basis);
+            let ggsw_params = CrtGgswParameters::with_glwe_params(&basic_ring_params, basis);
 
             let basis = match party_count {
                 256 => BigUintApproxSignedBasis::new(&modulus, 19, Some(5), &rns_base),
@@ -151,7 +172,8 @@ impl SsleParameters {
                 _ => unreachable!(),
             };
 
-            let expand_coeff_params = CrtGlevParameters::with_glwe_params(&ring_params, basis);
+            let expand_coeff_params =
+                CrtGlevParameters::with_glwe_params(&basic_ring_params, basis);
 
             Self {
                 commit_params,
