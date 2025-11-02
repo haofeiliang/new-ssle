@@ -81,4 +81,18 @@ impl MasterSecretKey {
     {
         self.dcrt_sk.decrypt(ciphertext, params, table, context)
     }
+    
+    pub fn encrypt_zeros_inplace<R, M, Table, A>(
+            &self,
+            result: &mut DcrtGlweCiphertext<A>,
+            params: &CrtGlweParameters<CrtValueT, M>,
+            table: &Table,
+            rng: &mut R,
+        ) where
+            R: rand::Rng + rand::CryptoRng,
+            M: FieldContext<CrtValueT>,
+            Table: DcrtTable<ValueT = CrtValueT> + Dcrt,
+            A: RawData<Elem = CrtValueT> + DataMut, {
+        self.dcrt_sk.encrypt_zeros_inplace(result, params, table, rng)
+    }
 }

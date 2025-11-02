@@ -5,7 +5,7 @@ use network::{
     IO, Id, NetIoError,
     netio::{NetIO, Participant},
 };
-use primus_fhe_core::{NttRlwePublicKey, NttRlweSecretKey, RlweSecretKey};
+use primus_fhe_core::{NttRlwePublicKey, NttRlweSecretKey};
 use primus_integer::UnsignedInteger;
 use primus_lattice::glwe::CrtGlwe;
 use tokio::runtime::Runtime;
@@ -99,13 +99,7 @@ impl Party {
     where
         R: rand::Rng + rand::CryptoRng,
     {
-        let commit_params = self.mpk.commit_params();
-
-        let commit_sk = RlweSecretKey::generate(commit_params, rng);
-        let commit_sk = NttRlweSecretKey::from_coeff_secret_key(&commit_sk, ntt_table);
-        let commit_pk = NttRlwePublicKey::new(&commit_sk, commit_params, ntt_table, rng);
-
-        (commit_sk, commit_pk)
+        self.mpk.generate_commit_key_pair(ntt_table, rng)
     }
 
     pub fn generate_init_acc(&self) -> CrtGlwe<Vec<CrtValueT>> {

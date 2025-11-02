@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use primus_fhe_core::{DcrtGlwePublicKey, NttRlwePublicKey, NttRlweSecretKey, RlweSecretKey};
-use primus_lattice::ggsw::DcrtGgsw;
+use primus_lattice::{ggsw::DcrtGgsw, glwe::CrtGlwe};
 use primus_poly::{DataMut, RawData};
 
 use crate::{CommitTable, CommitValueT, CrtTable, CrtValueT, SsleParameters};
@@ -98,6 +98,22 @@ impl MasterPublicKey {
         let commit_pk = NttRlwePublicKey::new(&commit_sk, commit_params, ntt_table, rng);
 
         (commit_sk, commit_pk)
+    }
+
+    pub fn generate_init_acc(&self, party_count: usize) -> CrtGlwe<Vec<CrtValueT>> {
+        let ring_params = self.ring_params();
+        let poly_length = ring_params.poly_length();
+
+        let mut acc: CrtGlwe<Vec<CrtValueT>> = CrtGlwe::zero(ring_params.rns_glwe_len());
+
+        let (_, b) = acc.a_b_mut_slices(ring_params.rns_glwe_mid());
+        b.chunks_exact_mut(poly_length)
+            .zip(ring_params.delta_mod_q())
+            .for_each(|(poly, &one)| {
+                poly.iter_mut().step_by(party_count).for_each(|v| *v = one);
+            });
+
+        acc
     }
 
     pub fn ring_params(

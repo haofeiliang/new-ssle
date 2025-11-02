@@ -542,7 +542,9 @@ fn party_operation(
 
         let cipher = Rlwe::new(ArrayBase(final_commit));
         let mut cipher = cipher.into_ntt_form(&commit_ntt_table);
-        cipher.mul_ntt_polynomial_assign(&inv_factor, CommitModulus);
+        if party_count <= poly_length {
+            cipher.mul_ntt_polynomial_assign(&inv_factor, CommitModulus);
+        }
 
         let msgs = commit_sk.decrypt(&cipher, commit_params, &commit_ntt_table);
 
@@ -574,6 +576,23 @@ fn party_operation(
             + (phase2_end - phase2_start),
         all: phase2_end - phase1_start,
     };
+
+    if party_id == 0 {
+        println!("commit bytes count: {}", commit.bytes_count());
+        println!("commit pk bytes count: {}", commit_pk.bytes_count());
+        println!("ggsw bytes count: {}", rotate_ggsw.bytes_count());
+        println!(
+            "encode commits bytes count: {}",
+            primus_integer::size::Size::bytes_count(&encode_commits)
+        );
+        let size = (rotate_ggsw.bytes_count()
+            + primus_integer::size::Size::bytes_count(&encode_commits))
+            * party_count;
+
+        let size: f64 = (size as f64) / 1024.0;
+        println!("communication size: {size}KB");
+        println!("communication size: {}MB", size / 1024.0);
+    }
 
     (degree, info)
 }
