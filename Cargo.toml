@@ -12,6 +12,7 @@ bytemuck = "1.23"
 rayon = "1.11.0"
 itertools = "0.14.0"
 criterion = "0.7"
+indicatif = { version = "0.18", features = ["rayon"] }
 
 primus_integer = { path = "../primus/primus_integer" }
 primus_reduce = { path = "../primus/primus_reduce" }

@@ -13,6 +13,7 @@ pub struct CommitModulus;
 #[cfg(not(feature = "gt128"))]
 #[derive(Barrett)]
 #[modulus(u32, value = 12289)]
+// #[modulus(u32, value = 40961)]
 pub struct CommitModulus;
 
 pub type CommitValueT = u32;
@@ -33,6 +34,7 @@ pub struct SsleParameters {
 }
 
 const GAMMA: CrtValueT = 2056193;
+// const GAMMA: CrtValueT = 2199023190017;
 
 impl SsleParameters {
     pub fn new(party_count: usize) -> Self {
@@ -62,8 +64,8 @@ impl SsleParameters {
             };
 
             let ring_params = CrtGlweParameters::new(
-                8,
-                512,
+                1,
+                4096,
                 BarrettModulus::new(CommitModulus.value_unchecked() as CrtValueT),
                 BarrettModulus::new(GAMMA),
                 &moduli,
@@ -72,8 +74,8 @@ impl SsleParameters {
             );
 
             let basic_ring_params = CrtGlweParameters::new(
-                8,
-                512,
+                1,
+                4096,
                 BarrettModulus::new(CommitModulus.value_unchecked() as CrtValueT),
                 BarrettModulus::new(GAMMA),
                 &moduli,
@@ -105,34 +107,16 @@ impl SsleParameters {
                 expand_coeff_params,
             }
         } else {
-            let poly_length = match party_count {
-                256 | 512 => 512,
-                1024 => 1024,
-                2048 => 2048,
-                _ => unreachable!(),
-            };
-
-            let commit_params = RlweParameters::new(
-                poly_length,
-                2,
-                CommitModulus,
-                RingSecretKeyType::Ternary,
-                0.849,
-            );
+            let commit_params =
+                RlweParameters::new(1024, 2, CommitModulus, RingSecretKeyType::Ternary, 0.849);
 
             let rns_moduli: [CrtValueT; 3] = [137438822401, 68719403009, 68719230977];
             let modulus = multiply_many_values(&rns_moduli);
             let moduli = rns_moduli.map(BarrettModulus::new).to_vec();
             let rns_base = RNSBase::new(&moduli).unwrap();
 
-            let poly_length = match party_count {
-                256 | 512 => 512,
-                1024 => 1024,
-                2048 => 2048,
-                _ => unreachable!(),
-            };
-
-            let dimmension = 4096 / poly_length;
+            let poly_length = 4096;
+            let dimmension = 1;
 
             let basis = match party_count {
                 256 => BigUintApproxSignedBasis::new(&modulus, 17, Some(5), &rns_base),

@@ -5,17 +5,23 @@ use network::{
     IO, Id, NetIoError,
     netio::{NetIO, Participant},
 };
+use primus_factor::ShoupFactor;
 use primus_fhe_core::{NttRlwePublicKey, NttRlweSecretKey};
-use primus_integer::UnsignedInteger;
+use primus_integer::{AsInto, UnsignedInteger};
 use primus_lattice::glwe::CrtGlwe;
+use primus_reduce::{Modulus, ops::ReduceInv};
 use tokio::runtime::Runtime;
 
-use crate::{CommitTable, CommitValueT, CrtValueT, MasterPublicKey, SsleParameters};
+use crate::{CommitModulus, CommitTable, CommitValueT, CrtValueT, MasterPublicKey, SsleParameters};
 
 pub struct Party {
     mpk: MasterPublicKey,
     rt: Runtime,
     netio: Arc<NetIO>,
+    inv_two: CommitValueT,
+    inv_two_factor: ShoupFactor<CommitValueT>,
+    inv_party_count: CommitValueT,
+    inv_party_count_factor: ShoupFactor<CommitValueT>,
 }
 
 impl Party {
@@ -38,11 +44,31 @@ impl Party {
                 .unwrap()
         };
 
+        let party_count = participants.len();
+
         let netio = rt
             .block_on(async { NetIO::new(party_id, participants).await })
             .unwrap();
 
-        Self { mpk, rt, netio }
+        let commit_params = mpk.commit_params();
+
+        let inv_two = CommitModulus.reduce_inv(2);
+        let inv_two_factor = ShoupFactor::new(inv_two, CommitModulus.value_unchecked());
+        let inv_party_count = commit_params
+            .cipher_modulus()
+            .reduce_inv(party_count.as_into());
+        let inv_party_count_factor =
+            ShoupFactor::new(inv_party_count, CommitModulus.value_unchecked());
+
+        Self {
+            mpk,
+            rt,
+            netio,
+            inv_two,
+            inv_two_factor,
+            inv_party_count,
+            inv_party_count_factor,
+        }
     }
 
     pub fn party_id(&self) -> Id {
@@ -63,6 +89,22 @@ impl Party {
 
     pub fn table(&self) -> &primus_ntt::CrtConcrete64Table {
         self.mpk.table()
+    }
+
+    pub fn inv_two(&self) -> CommitValueT {
+        self.inv_two
+    }
+
+    pub fn inv_two_factor(&self) -> ShoupFactor<CommitValueT> {
+        self.inv_two_factor
+    }
+
+    pub fn inv_party_count(&self) -> CommitValueT {
+        self.inv_party_count
+    }
+
+    pub fn inv_party_count_factor(&self) -> ShoupFactor<CommitValueT> {
+        self.inv_party_count_factor
     }
 
     pub fn generate_rotate_rgsw<R>(
