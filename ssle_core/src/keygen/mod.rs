@@ -34,7 +34,7 @@ impl KeyGen {
         let pk = DcrtGlwePublicKey::new(&dcrt_sk, &ring_params, table.as_ref(), rng);
 
         let eck = CoefficientExpansionKey::new(
-            params.expand_coeff_params(),
+            params.expand_coeff_params_for_key_gen(),
             &sk,
             &dcrt_sk,
             Arc::clone(&table),

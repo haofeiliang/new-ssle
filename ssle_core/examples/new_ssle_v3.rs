@@ -1,7 +1,8 @@
 // cargo run --release --package ssle_core --example new_ssle_v3 -- -p 4
-// cargo run --release --package ssle_core --example new_ssle_v3 --features="gt128" -- -t 1 -p 256
+// cargo run --release --package ssle_core --example new_ssle_v3 --features="gt128" -- -p 256
 // cargo +nightly run --release --package ssle_core --example new_ssle_v3 --features="nightly" -- -p 4
-// cargo +nightly run --release --package ssle_core --example new_ssle_v3 --features="nightly gt128" -- -t 1 -p 256
+// cargo +nightly run --release --package ssle_core --example new_ssle_v3 --features="nightly gt32" -- -p 64
+// cargo +nightly run --release --package ssle_core --example new_ssle_v3 --features="nightly gt128" -- -p 256
 
 use std::sync::Arc;
 
@@ -506,21 +507,21 @@ fn party_operation(
 }
 
 fn check_result(
-    params: &SsleParameters,
+    _params: &SsleParameters,
     party_count: usize,
     threads: Vec<std::thread::JoinHandle<usize>>,
 ) {
     let degrees: Vec<usize> = threads.into_iter().map(|h| h.join().unwrap()).collect();
-    let poly_length = params.ring_params().poly_length();
+    // let poly_length = params.ring_params().poly_length();
 
     let sum = degrees.into_iter().sum::<usize>();
-    println!("\ndegree sum: {sum}",);
-    println!("degree mod 2*n: {}", sum % (poly_length * 2));
+    // println!("\ndegree sum: {sum}",);
+    // println!("degree mod 2*n: {}", sum % (poly_length * 2));
     let leader = sum % party_count;
-    println!(
-        "degree mod 2*n nearest party count: {}",
-        (sum - leader) % (poly_length * 2)
-    );
+    // println!(
+    //     "degree mod 2*n nearest party count: {}",
+    //     (sum - leader) % (poly_length * 2)
+    // );
     println!("leader: {leader}\n");
     println!("Parties count: {party_count}");
 }

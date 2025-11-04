@@ -1,13 +1,14 @@
 // cargo run --release --package ssle_core --example ssle_compute_time -- -p 4
 // cargo run --release --package ssle_core --example ssle_compute_time --features="gt128" -- -p 256
 // cargo +nightly run --release --package ssle_core --example ssle_compute_time --features="nightly" -- -p 4
+// cargo +nightly run --release --package ssle_core --example ssle_compute_time --features="nightly gt32" -- -p 64
 // cargo +nightly run --release --package ssle_core --example ssle_compute_time --features="nightly gt128" -- -p 256
 
 use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
 use itertools::izip;
-use network::netio::Participant;
+use primus_factor::ShoupFactor;
 use primus_fhe_core::{CrtGlweTraceContext, DcrtGlweCiphertext, DcrtGlweDecryptContext};
 use primus_integer::AsInto;
 use primus_lattice::{
@@ -19,12 +20,19 @@ use primus_lattice::{
 use primus_ntt::{Dcrt, Ntt, NttTable};
 use primus_poly::{ArrayBase, Polynomial, PolynomialOwned, dcrt::DcrtPolynomial};
 use primus_reduce::Modulus;
+use primus_reduce::ops::ReduceInv;
 use rand::{Rng, distr::Uniform};
 use ssle_core::{
     CoefficientExpansionKey, CommitModulus, CommitTable, CommitValueT, CrtValueT, KeyGen,
     MasterPublicKey, MasterSecretKey, SsleParameters,
 };
 use tabled::{Table, Tabled, settings::Rotate};
+
+#[cfg(feature = "gt32")]
+const GT32: bool = true;
+
+#[cfg(not(feature = "gt32"))]
+const GT32: bool = false;
 
 #[cfg(feature = "gt128")]
 const GT128: bool = true;
@@ -34,8 +42,6 @@ const GT128: bool = false;
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
-const BASE_PORT: u16 = 30000;
 
 #[derive(Clone, Copy, Tabled)]
 struct TimeInfo {
@@ -75,17 +81,31 @@ fn check_args(args: Args) -> (usize, SsleParameters) {
         None => 2,
     };
 
-    let params = if party_count <= 128 {
-        if !GT128 {
+    let params = if party_count <= 32 {
+        if !GT32 && !GT128 {
             SsleParameters::new(party_count)
         } else {
-            panic!("Don't enable feature `gt128` for party count: {party_count}<=128!")
+            panic!("Don't enable feature `gt32` and `gt128` for party count: {party_count}<=32!")
+        }
+    } else if party_count <= 128 {
+        if GT32 && !GT128 {
+            SsleParameters::new(party_count)
+        } else {
+            if !GT32 {
+                panic!("Enable feature `gt32` for party count: {party_count}!")
+            } else {
+                panic!("Don't enable feature `gt128` for party count: {party_count}<=128!")
+            }
         }
     } else if party_count > 128 && party_count <= 2048 {
         if GT128 {
             SsleParameters::new(party_count)
         } else {
-            panic!("Enable feature `gt128` for party count: {party_count}!")
+            if GT32 {
+                panic!("Don't enable feature `gt32` for party count: {party_count}>128!")
+            } else {
+                panic!("Enable feature `gt128` for party count: {party_count}!")
+            }
         }
     } else {
         panic!("no preparation for party count lager than 2048!")
@@ -100,17 +120,16 @@ fn main() {
     let args = Args::parse();
 
     let (party_count, params) = check_args(args);
+
     let params = Arc::new(params);
 
     let rng = &mut rand::rng();
-
-    let participants = Participant::from_default(party_count, BASE_PORT);
 
     let (msk, mpk, eck) = KeyGen::generate_keys(&params, rng);
 
     println!("Key Generation done!");
 
-    let time_info = party_operation(participants, msk, mpk, eck);
+    let time_info = party_operation(party_count, msk, mpk, eck);
 
     let mut table = Table::new([time_info]);
     table.with(Rotate::Left);
@@ -119,14 +138,12 @@ fn main() {
 }
 
 fn party_operation(
-    participants: Vec<Participant>,
+    party_count: usize,
     msk: MasterSecretKey,
     mpk: MasterPublicKey,
     eck: CoefficientExpansionKey,
 ) -> TimeInfo {
     let rng = &mut rand::rng();
-
-    let party_count = participants.len();
 
     let ssle_params = mpk.params();
     let commit_params = ssle_params.commit_params();
@@ -134,47 +151,57 @@ fn party_operation(
     let ggsw_params = ssle_params.ggsw_params();
     let expand_coeff_params = ssle_params.expand_coeff_params();
 
-    let poly_length = commit_params.poly_length();
+    let commit_poly_length = commit_params.poly_length();
 
-    assert_eq!(poly_length, ring_params.poly_length());
+    let ring_poly_length = ring_params.poly_length();
 
     let table = mpk.table();
 
-    let commit_rlwe_len = poly_length * 2;
+    let commit_rlwe_len = commit_poly_length * 2;
     let rns_poly_len = ring_params.rns_poly_len();
     let rns_glwe_len = ring_params.rns_glwe_len();
     let big_uint_poly_len = ring_params.big_uint_poly_len();
     let rns_ggsw_len = ggsw_params.rns_ggsw_len();
     let base_q = ring_params.base_q();
 
-    let commit_ntt_table = CommitTable::new(poly_length.trailing_zeros(), CommitModulus).unwrap();
+    let commit_ntt_table =
+        CommitTable::new(commit_poly_length.trailing_zeros(), CommitModulus).unwrap();
 
     let mut external_product_context =
-        DcrtGlevContext::new(poly_length, rns_poly_len, big_uint_poly_len);
+        DcrtGlevContext::new(ring_poly_length, rns_poly_len, big_uint_poly_len);
 
     let mut expand_coeff_context = CrtGlweTraceContext::new(
         expand_coeff_params.dimension(),
-        poly_length,
+        ring_poly_length,
         rns_poly_len,
         big_uint_poly_len,
     );
 
-    let mut factor = PolynomialOwned::zero(poly_length);
-    factor.iter_mut().step_by(party_count).for_each(|v| *v = 1);
-    let factor = commit_ntt_table.transform_inplace(factor);
+    let inv_two = CommitModulus.reduce_inv(2);
+    let inv_two_factor = ShoupFactor::new(inv_two, CommitModulus.value_unchecked());
 
-    let inv_factor = factor.try_inv(CommitModulus).unwrap();
+    let mut poly_for_div_v: PolynomialOwned<CommitValueT> = Polynomial::zero(ring_poly_length);
+
+    let mut div_v = |poly: &mut [CommitValueT]| {
+        poly_for_div_v.copy_from(poly.as_ref());
+        poly_for_div_v.mul_monomial_assign(party_count, CommitModulus);
+
+        let mut p = Polynomial(ArrayBase(poly));
+
+        p.sub_assign(&poly_for_div_v, CommitModulus);
+        // p.mul_scalar_assign(inv_two, CommitModulus);
+        p.mul_factor_assign(inv_two_factor, CommitModulus.value_unchecked());
+    };
 
     let mut acc: CrtGlwe<Vec<CrtValueT>> = mpk.generate_init_acc(party_count);
-    let uniform_poly_length = Uniform::new(0, poly_length).unwrap();
+    let uniform_ring_poly_length = Uniform::new(0, ring_poly_length).unwrap();
 
     let all_degree: Vec<usize> = rng
-        .sample_iter(uniform_poly_length)
+        .sample_iter(uniform_ring_poly_length)
         .take(party_count)
         .collect();
 
-    let r: usize = all_degree.iter().sum();
-    let choose = r % party_count;
+    let choose = all_degree.iter().sum::<usize>() % party_count;
 
     // Generate commit pk and sk.
     let (all_commit_sk, all_commit_pk): (Vec<_>, Vec<_>) = (0..party_count)
@@ -209,11 +236,12 @@ fn party_operation(
     let mut expand_result = vec![<CrtGlwe<Vec<CrtValueT>>>::zero(rns_glwe_len); party_count];
     let mut selectors = vec![<DcrtGlwe<Vec<CrtValueT>>>::zero(rns_glwe_len); party_count];
 
-    let mut temp: Vec<CrtValueT> = vec![0; poly_length];
+    let mut temp: Vec<CrtValueT> = vec![0; ring_poly_length];
     let mut msg: DcrtPolynomial<Vec<CrtValueT>> = DcrtPolynomial::zero(rns_poly_len);
 
     let mut all_encode_commits: Vec<CrtValueT> = vec![0; rns_glwe_len * 2 * party_count];
     let mut final_encode_commits: Vec<CrtValueT> = vec![0; rns_glwe_len * 2];
+    let mut decoded_commit: Vec<CommitValueT> = vec![0; commit_poly_length * 2];
 
     all_encode_commits
         .chunks_exact_mut(rns_glwe_len)
@@ -269,9 +297,11 @@ fn party_operation(
         let mut output = NttRlwe::new(ArrayBase(rr_commit.as_mut()));
         commit_pk.encrypt_zeros_inplace(&mut output, commit_params, &commit_ntt_table, rng);
 
-        output.iter_ntt_poly_mut(poly_length).for_each(|poly| {
-            commit_ntt_table.inverse_transform_slice(poly);
-        });
+        output
+            .iter_ntt_poly_mut(commit_poly_length)
+            .for_each(|poly| {
+                commit_ntt_table.inverse_transform_slice(poly);
+            });
 
         rr_commit.add_element_wise_assign(commit, CommitModulus);
     }
@@ -282,15 +312,16 @@ fn party_operation(
         .for_each(|(selector, rr_commit)| {
             encode_commits
                 .chunks_exact_mut(rns_glwe_len)
-                .zip(rr_commit.iter_poly(poly_length))
+                .zip(rr_commit.iter_poly(commit_poly_length))
                 .for_each(|(encode_commit, poly)| {
+                    temp.fill(0);
                     temp.iter_mut()
                         .zip(poly)
                         .for_each(|(x, y)| *x = *y as CrtValueT);
                     base_q.wrapping_decompose_small_values_inplace(
                         &temp,
                         msg.as_mut(),
-                        poly_length,
+                        ring_poly_length,
                         CommitModulus.value_unchecked().as_into(),
                     );
                     table.transform_slice(msg.as_mut());
@@ -298,7 +329,7 @@ fn party_operation(
                         .add_dcrt_glwe_mul_dcrt_polynomial_assign(
                             selector,
                             &msg,
-                            poly_length,
+                            ring_poly_length,
                             ring_params.cipher_moduli(),
                         );
                 });
@@ -314,7 +345,7 @@ fn party_operation(
                 .for_each(|(x, y)| {
                     DcrtGlwe::new(ArrayBase(y)).add_element_wise_assign(
                         &DcrtGlwe::new(ArrayBase(x)),
-                        poly_length,
+                        ring_poly_length,
                         rns_poly_len,
                         ring_params.cipher_moduli(),
                     );
@@ -323,15 +354,48 @@ fn party_operation(
 
     let phase1_end = quanta::Instant::now();
 
-    let final_commit = sim_thfhe_decrypt(party_count, &msk, ssle_params, final_encode_commits);
+    let mut final_commit = sim_thfhe_decrypt(party_count, &msk, ssle_params, final_encode_commits);
 
     let phase2_start = quanta::Instant::now();
 
-    let cipher = Rlwe::new(ArrayBase(final_commit));
-    let mut cipher = cipher.into_ntt_form(&commit_ntt_table);
-    if party_count < poly_length {
-        cipher.mul_ntt_polynomial_assign(&inv_factor, CommitModulus);
+    final_commit
+        .chunks_exact_mut(ring_poly_length)
+        .for_each(|poly| div_v(poly));
+
+    {
+        let (a_in, b_in) = final_commit.split_at_mut(ring_poly_length);
+        let (a_out, b_out) = decoded_commit.split_at_mut(commit_poly_length);
+
+        let mut a_arr = ArrayBase(a_out);
+        let mut b_arr = ArrayBase(b_out);
+
+        let mut last = None;
+        'o: for (i, (a_chunk, b_chunk)) in a_in
+            .chunks_exact(commit_poly_length)
+            .zip(b_in.chunks_exact(commit_poly_length))
+            .enumerate()
+        {
+            if !ArrayBase(a_chunk).is_zero() || !ArrayBase(b_chunk).is_zero() {
+                if let Some(last) = last {
+                    if last + 1 != i {
+                        a_arr.add_element_wise_assign(&ArrayBase(a_chunk), CommitModulus);
+                        b_arr.add_element_wise_assign(&ArrayBase(b_chunk), CommitModulus);
+                    } else {
+                        a_arr.sub_element_wise_assign(&ArrayBase(a_chunk), CommitModulus);
+                        b_arr.sub_element_wise_assign(&ArrayBase(b_chunk), CommitModulus);
+                    }
+                    break 'o;
+                } else {
+                    a_arr.copy_from_slice(a_chunk);
+                    b_arr.copy_from_slice(b_chunk);
+                    last = Some(i);
+                }
+            }
+        }
     }
+
+    let cipher = Rlwe::new(ArrayBase(decoded_commit));
+    let cipher = cipher.into_ntt_form(&commit_ntt_table);
 
     let msgs = all_commit_sk[choose].decrypt(&cipher, commit_params, &commit_ntt_table);
 
@@ -364,7 +428,12 @@ fn party_operation(
     let size = all_rotate_ggsw[0].bytes_count() * party_count
         + primus_integer::size::Size::bytes_count(&all_encode_commits);
 
-    let size: f64 = (size as f64) / 1024.0;
+    let mut size: f64 = (size as f64) / 1024.0;
+    size *= if party_count <= 128 {
+        50.0 / 64.0
+    } else {
+        37.0 / 64.0
+    };
     println!("communication size: {size}KB");
     println!("communication size: {}MB", size / 1024.0);
 
@@ -377,25 +446,23 @@ fn sim_thfhe_decrypt(
     params: &SsleParameters,
     encoded_commits: Vec<CrtValueT>,
 ) -> Vec<CommitValueT> {
-    let commit_poly_length = params.commit_params().poly_length();
     let ring_params = params.ring_params();
+    let ring_poly_length = ring_params.poly_length();
 
     let mid = encoded_commits.len() / 2;
 
-    assert_eq!(mid, ring_params.rns_glwe_len());
-
-    let mut commit_data: Vec<CrtValueT> = vec![0; commit_poly_length * 2];
+    let mut commit_data: Vec<CrtValueT> = vec![0; ring_poly_length * 2];
     let mut context =
-        DcrtGlweDecryptContext::new(ring_params.cipher_moduli_count(), ring_params.poly_length());
+        DcrtGlweDecryptContext::new(ring_params.cipher_moduli_count(), ring_poly_length);
 
     for (poly, encoded_commit) in commit_data
-        .chunks_mut(commit_poly_length)
+        .chunks_mut(ring_poly_length)
         .zip(encoded_commits.chunks_exact(mid))
     {
         msk.decrypt_inplace(
             &DcrtGlweCiphertext::new(ArrayBase(encoded_commit)),
             &mut Polynomial(ArrayBase(poly)),
-            ring_params,
+            params.ring_params(),
             msk.table(),
             &mut context,
         );
