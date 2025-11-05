@@ -29,6 +29,12 @@ use ssle_core::{
     MasterPublicKey, MasterSecretKey, Party, SsleParameters,
 };
 
+#[cfg(feature = "gt32")]
+const GT32: bool = true;
+
+#[cfg(not(feature = "gt32"))]
+const GT32: bool = false;
+
 #[cfg(feature = "gt128")]
 const GT128: bool = true;
 
@@ -69,17 +75,31 @@ fn check_args(args: Args) -> (usize, usize, SsleParameters) {
         None => 2,
     };
 
-    let params = if party_count <= 128 {
-        if !GT128 {
+    let params = if party_count <= 32 {
+        if !GT32 && !GT128 {
             SsleParameters::new(party_count)
         } else {
-            panic!("Don't enable feature `gt128` for party count: {party_count}<=128!")
+            panic!("Don't enable feature `gt32` and `gt128` for party count: {party_count}<=32!")
+        }
+    } else if party_count <= 128 {
+        if GT32 && !GT128 {
+            SsleParameters::new(party_count)
+        } else {
+            if !GT32 {
+                panic!("Enable feature `gt32` for party count: {party_count}!")
+            } else {
+                panic!("Don't enable feature `gt128` for party count: {party_count}<=128!")
+            }
         }
     } else if party_count > 128 && party_count <= 2048 {
         if GT128 {
             SsleParameters::new(party_count)
         } else {
-            panic!("Enable feature `gt128` for party count: {party_count}!")
+            if GT32 {
+                panic!("Don't enable feature `gt32` for party count: {party_count}>128!")
+            } else {
+                panic!("Enable feature `gt128` for party count: {party_count}!")
+            }
         }
     } else {
         panic!("no preparation for party count lager than 2048!")
@@ -487,18 +507,23 @@ fn party_operation(
     }
 
     if party_id == 0 {
-        println!("commit bytes count: {}", commit.bytes_count());
-        println!("commit pk bytes count: {}", commit_pk.bytes_count());
-        println!("ggsw bytes count: {}", rotate_ggsw.bytes_count());
-        println!(
-            "encode commits bytes count: {}",
-            primus_integer::size::Size::bytes_count(&encode_commits)
-        );
+        // println!("commit bytes count: {}", commit.bytes_count());
+        // println!("commit pk bytes count: {}", commit_pk.bytes_count());
+        // println!("ggsw bytes count: {}", rotate_ggsw.bytes_count());
+        // println!(
+        //     "encode commits bytes count: {}",
+        //     primus_integer::size::Size::bytes_count(&encode_commits)
+        // );
         let size = (rotate_ggsw.bytes_count()
             + primus_integer::size::Size::bytes_count(&encode_commits))
             * party_count;
 
-        let size: f64 = (size as f64) / 1024.0;
+        let mut size: f64 = (size as f64) / 1024.0;
+        size *= if party_count <= 128 {
+            50.0 / 64.0
+        } else {
+            37.0 / 64.0
+        };
         println!("communication size: {size}KB");
         println!("communication size: {}MB", size / 1024.0);
     }
