@@ -422,18 +422,33 @@ fn party_operation(
         all: phase2_end - phase1_start,
     };
 
-    println!("commit bytes count: {}", all_commit[0].bytes_count());
-    println!("commit pk bytes count: {}", all_commit_pk[0].bytes_count());
-    println!("ggsw bytes count: {}", all_rotate_ggsw[0].bytes_count());
-    let size = all_rotate_ggsw[0].bytes_count() * party_count
-        + primus_integer::size::Size::bytes_count(&all_encode_commits);
+    // println!("commit bytes count: {}", all_commit[0].bytes_count());
+    // println!("commit pk bytes count: {}", all_commit_pk[0].bytes_count());
+    // println!("ggsw bytes count: {}", all_rotate_ggsw[0].bytes_count());
 
-    let mut size: f64 = (size as f64) / 1024.0;
-    size *= if party_count <= 128 {
+    let factor = if party_count <= 128 {
         50.0 / 64.0
     } else {
         37.0 / 64.0
     };
+
+    let size1 = (all_rotate_ggsw[0].bytes_count() * (party_count - 1)) as f64 * factor / 1024.0;
+    let size2 =
+        primus_integer::size::Size::bytes_count(&all_encode_commits) as f64 * factor / 1024.0;
+
+    let single_size1 = (all_rotate_ggsw[0].bytes_count()) as f64 * factor / 1024.0;
+    let single_size2 = size2 / party_count as f64;
+
+    let size2 = single_size2 * (party_count - 1) as f64;
+
+    println!("First Round single size: {single_size1}KB");
+    println!("Second Round single size: {single_size2}KB");
+
+    println!("First Round size: {size1}KB");
+    println!("Second Round size: {size2}KB");
+
+    let size = size1 + size2;
+
     println!("communication size: {size}KB");
     println!("communication size: {}MB", size / 1024.0);
 

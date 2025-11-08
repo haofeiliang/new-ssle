@@ -516,7 +516,7 @@ fn party_operation(
         // );
         let size = (rotate_ggsw.bytes_count()
             + primus_integer::size::Size::bytes_count(&encode_commits))
-            * party_count;
+            * (party_count - 1);
 
         let mut size: f64 = (size as f64) / 1024.0;
         size *= if party_count <= 128 {
