@@ -167,7 +167,7 @@ impl SsleParameters {
                 256 => BigUintApproxSignedBasis::new(&modulus, 21, Some(4), &rns_base),
                 512 => BigUintApproxSignedBasis::new(&modulus, 18, Some(5), &rns_base),
                 1024 => BigUintApproxSignedBasis::new(&modulus, 15, Some(6), &rns_base),
-                2048 => BigUintApproxSignedBasis::new(&modulus, 16, Some(5), &rns_base),
+                2048 => BigUintApproxSignedBasis::new(&modulus, 15, Some(6), &rns_base),
                 _ => unreachable!(),
             };
 
