@@ -206,8 +206,8 @@ fn sim_thfhe_decrypt(
             .zip(encoded_commits.chunks_exact(mid))
         {
             msk.decrypt_inplace(
-                &DcrtGlweCiphertext::new(ArrayBase(encoded_commit)),
-                &mut Polynomial(ArrayBase(poly)),
+                &DcrtGlweCiphertext::new(encoded_commit),
+                &mut Polynomial(poly),
                 params.ring_params(),
                 msk.table(),
                 &mut context,
@@ -281,7 +281,7 @@ fn party_operation(
         poly_for_div_v.copy_from(poly.as_ref());
         poly_for_div_v.mul_monomial_assign(party_count, CommitModulus);
 
-        let mut p = Polynomial(ArrayBase(poly));
+        let mut p = Polynomial(poly);
 
         p.sub_assign(&poly_for_div_v, CommitModulus);
         // p.mul_scalar_assign(inv_two, CommitModulus);
@@ -300,11 +300,6 @@ fn party_operation(
 
     let mut commit = commit.into_coeff_form(&commit_ntt_table);
 
-    // let inv_party_count = commit_params
-    //     .cipher_modulus()
-    //     .reduce_inv(party_count.as_into());
-
-    // commit.mul_scalar_assign(inv_party_count, CommitModulus);
     commit.mul_factor_assign(
         party.inv_party_count_factor(),
         CommitModulus.value_unchecked(),
@@ -386,13 +381,13 @@ fn party_operation(
         all_commit_pk.iter(),
         all_rr_commit.iter_mut(),
     ) {
-        let mut output = NttRlwe::new(ArrayBase(rr_commit.as_mut()));
+        let mut output = NttRlwe(rr_commit.as_mut());
         commit_pk.encrypt_zeros_inplace(&mut output, commit_params, &commit_ntt_table, rng);
 
         output
             .iter_ntt_poly_mut(commit_poly_length)
             .for_each(|poly| {
-                commit_ntt_table.inverse_transform_slice(poly);
+                commit_ntt_table.inverse_transform_slice(poly.0);
             });
 
         rr_commit.add_element_wise_assign(commit, CommitModulus);
@@ -405,32 +400,35 @@ fn party_operation(
     let mut final_encode_commits: Vec<CrtValueT> = vec![0; rns_glwe_len * 2];
     let mut all_encode_commits: Vec<CrtValueT> = vec![0; rns_glwe_len * 2 * party_count];
 
-    izip!(selectors.iter(), all_rr_commit.iter()).for_each(|(selector, rr_commit)| {
-        encode_commits
-            .chunks_exact_mut(rns_glwe_len)
-            .zip(rr_commit.iter_poly(commit_poly_length))
-            .for_each(|(encode_commit, poly)| {
-                temp.fill(0);
-                temp.iter_mut()
-                    .zip(poly)
-                    .for_each(|(x, &y)| *x = y as CrtValueT);
-                ring_params
-                    .base_q()
-                    .wrapping_decompose_small_values_inplace(
-                        &temp,
-                        msg.as_mut(),
+    selectors
+        .iter()
+        .zip(all_rr_commit.iter())
+        .for_each(|(selector, rr_commit)| {
+            encode_commits
+                .chunks_exact_mut(rns_glwe_len)
+                .zip(rr_commit.iter_poly(commit_poly_length))
+                .for_each(|(encode_commit, poly)| {
+                    temp.fill(0);
+                    temp.iter_mut()
+                        .zip(poly.iter())
+                        .for_each(|(x, &y)| *x = y as CrtValueT);
+                    ring_params
+                        .base_q()
+                        .wrapping_decompose_small_values_inplace(
+                            &temp,
+                            msg.as_mut(),
+                            ring_poly_length,
+                            CommitModulus.value_unchecked().as_into(),
+                        );
+                    table.transform_slice(msg.as_mut());
+                    DcrtGlwe(encode_commit).add_dcrt_glwe_mul_dcrt_polynomial_assign(
+                        selector,
+                        &msg,
                         ring_poly_length,
-                        CommitModulus.value_unchecked().as_into(),
+                        ring_params.cipher_moduli(),
                     );
-                table.transform_slice(msg.as_mut());
-                DcrtGlwe::new(ArrayBase(encode_commit)).add_dcrt_glwe_mul_dcrt_polynomial_assign(
-                    selector,
-                    &msg,
-                    ring_poly_length,
-                    ring_params.cipher_moduli(),
-                );
-            });
-    });
+                });
+        });
 
     // Share commits
     party.share_v2(encode_commits.as_ref(), all_encode_commits.as_mut());
@@ -441,8 +439,8 @@ fn party_operation(
             ecs.chunks_exact(rns_glwe_len)
                 .zip(final_encode_commits.chunks_exact_mut(rns_glwe_len))
                 .for_each(|(x, y)| {
-                    DcrtGlwe::new(ArrayBase(y)).add_element_wise_assign(
-                        &DcrtGlwe::new(ArrayBase(x)),
+                    DcrtGlwe(y).add_element_wise_assign(
+                        &DcrtGlwe(x),
                         ring_poly_length,
                         rns_poly_len,
                         ring_params.cipher_moduli(),
@@ -494,7 +492,7 @@ fn party_operation(
             }
         }
 
-        let cipher = Rlwe::new(ArrayBase(decoded_commit));
+        let cipher = Rlwe(decoded_commit);
         let cipher = cipher.into_ntt_form(&commit_ntt_table);
 
         let msgs = commit_sk.decrypt(&cipher, commit_params, &commit_ntt_table);
@@ -514,8 +512,8 @@ fn party_operation(
         //     "encode commits bytes count: {}",
         //     primus_integer::size::Size::bytes_count(&encode_commits)
         // );
-        let size = (rotate_ggsw.bytes_count()
-            + primus_integer::size::Size::bytes_count(&encode_commits))
+        let size = (rotate_ggsw.byte_count()
+            + primus_integer::size::Size::byte_count(&encode_commits))
             * (party_count - 1);
 
         let mut size: f64 = (size as f64) / 1024.0;

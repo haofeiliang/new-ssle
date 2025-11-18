@@ -72,11 +72,7 @@ fn test_rotate_commit() {
         // println!("r: {r}");
         // let r = 8192 - 512 + 4;
 
-        CrtPolynomial(ArrayBase(b)).mul_monomial_assign(
-            r,
-            ring_poly_length,
-            ring_params.cipher_moduli(),
-        );
+        CrtPolynomial(b).mul_monomial_assign(r, ring_poly_length, ring_params.cipher_moduli());
 
         let selector = acc.into_ntt_form(table);
 
@@ -90,7 +86,7 @@ fn test_rotate_commit() {
             .for_each(|(encode_commit, poly)| {
                 temp.fill(0);
                 temp.iter_mut()
-                    .zip(poly)
+                    .zip(poly.iter())
                     .for_each(|(x, &y)| *x = y as CrtValueT);
                 ring_params
                     .base_q()
@@ -101,7 +97,7 @@ fn test_rotate_commit() {
                         CommitModulus.value_unchecked().as_into(),
                     );
                 table.transform_slice(msg.as_mut());
-                DcrtGlwe::new(ArrayBase(encode_commit)).add_dcrt_glwe_mul_dcrt_polynomial_assign(
+                DcrtGlwe(encode_commit).add_dcrt_glwe_mul_dcrt_polynomial_assign(
                     &selector,
                     &msg,
                     ring_poly_length,
@@ -122,7 +118,7 @@ fn test_rotate_commit() {
             temp.copy_from(poly.as_ref());
             temp.mul_monomial_assign(party_count, CommitModulus);
 
-            let mut p = Polynomial(ArrayBase(poly));
+            let mut p = Polynomial(poly);
 
             p.sub_assign(&temp, CommitModulus);
             p.mul_scalar_assign(inv_two, CommitModulus);
@@ -135,8 +131,8 @@ fn test_rotate_commit() {
         )
         .for_each(|(ec, cpoly, commit_poly)| {
             msk.decrypt_inplace(
-                &DcrtGlwe::new(ArrayBase(ec)),
-                &mut Polynomial(ArrayBase(&mut *cpoly)),
+                &DcrtGlwe::new(ec),
+                &mut Polynomial(&mut *cpoly),
                 ring_params,
                 table,
                 &mut decrypt_context,
@@ -186,12 +182,12 @@ fn test_rotate_commit() {
             });
 
         let alpha_msgs = commit_sk.decrypt(
-            &NttRlwe::new(ArrayBase(final_alpha_commit.as_ref())),
+            &NttRlwe::new(final_alpha_commit.as_ref()),
             commit_params,
             &commit_ntt_table,
         );
         let beta_msgs = commit_sk.decrypt(
-            &NttRlwe::new(ArrayBase(final_beta_commit.as_ref())),
+            &NttRlwe::new(final_beta_commit.as_ref()),
             commit_params,
             &commit_ntt_table,
         );
@@ -199,12 +195,12 @@ fn test_rotate_commit() {
         assert!(alpha_msgs.is_zero() || beta_msgs.is_zero(), "r: {r}");
 
         let alpha_msgs = commit_sk_2.decrypt(
-            &NttRlwe::new(ArrayBase(final_alpha_commit.as_ref())),
+            &NttRlwe::new(final_alpha_commit.as_ref()),
             commit_params,
             &commit_ntt_table,
         );
         let beta_msgs = commit_sk_2.decrypt(
-            &NttRlwe::new(ArrayBase(final_beta_commit.as_ref())),
+            &NttRlwe::new(final_beta_commit.as_ref()),
             commit_params,
             &commit_ntt_table,
         );
@@ -268,11 +264,7 @@ fn test_rotate_commit2() {
         // println!("r: {r}");
         // let r = 8192 - 512 + 4;
 
-        CrtPolynomial(ArrayBase(b)).mul_monomial_assign(
-            r,
-            ring_poly_length,
-            ring_params.cipher_moduli(),
-        );
+        CrtPolynomial(b).mul_monomial_assign(r, ring_poly_length, ring_params.cipher_moduli());
 
         let selector = acc.into_ntt_form(table);
 
@@ -286,7 +278,7 @@ fn test_rotate_commit2() {
             .for_each(|(encode_commit, poly)| {
                 temp.fill(0);
                 temp.iter_mut()
-                    .zip(poly)
+                    .zip(poly.iter())
                     .for_each(|(x, &y)| *x = y as CrtValueT);
                 ring_params
                     .base_q()
@@ -297,7 +289,7 @@ fn test_rotate_commit2() {
                         CommitModulus.value_unchecked().as_into(),
                     );
                 table.transform_slice(msg.as_mut());
-                DcrtGlwe::new(ArrayBase(encode_commit)).add_dcrt_glwe_mul_dcrt_polynomial_assign(
+                DcrtGlwe(encode_commit).add_dcrt_glwe_mul_dcrt_polynomial_assign(
                     &selector,
                     &msg,
                     ring_poly_length,
@@ -318,7 +310,7 @@ fn test_rotate_commit2() {
             temp.copy_from(poly.as_ref());
             temp.mul_monomial_assign(party_count, CommitModulus);
 
-            let mut p = Polynomial(ArrayBase(poly));
+            let mut p = Polynomial(poly);
 
             p.sub_assign(&temp, CommitModulus);
             p.mul_scalar_assign(inv_two, CommitModulus);
@@ -331,8 +323,8 @@ fn test_rotate_commit2() {
         )
         .for_each(|(ec, cpoly, commit_poly)| {
             msk.decrypt_inplace(
-                &DcrtGlwe::new(ArrayBase(ec)),
-                &mut Polynomial(ArrayBase(&mut *cpoly)),
+                &DcrtGlwe(ec),
+                &mut Polynomial(&mut *cpoly),
                 ring_params,
                 table,
                 &mut decrypt_context,
@@ -412,7 +404,7 @@ fn test_rotate_commit2() {
             });
 
         let msgs = commit_sk.decrypt(
-            &NttRlwe::new(ArrayBase(final_commit.as_ref())),
+            &NttRlwe::new(final_commit.as_ref()),
             commit_params,
             &commit_ntt_table,
         );
@@ -420,7 +412,7 @@ fn test_rotate_commit2() {
         assert!(msgs.is_zero(), "r: {r}");
 
         let msgs = commit_sk_2.decrypt(
-            &NttRlwe::new(ArrayBase(final_commit.as_ref())),
+            &NttRlwe::new(final_commit.as_ref()),
             commit_params,
             &commit_ntt_table,
         );
@@ -455,8 +447,8 @@ fn inv_v() {
 
     let mut result: PolynomialOwned<CommitValueT> = Polynomial::zero(ring_poly_length);
 
-    Polynomial(ArrayBase(msg.as_mut_slice())).naive_mul_inplace(
-        &Polynomial(ArrayBase(v.as_ref())),
+    Polynomial(msg.as_mut_slice()).naive_mul_inplace(
+        &Polynomial(v.as_ref()),
         &mut result,
         CommitModulus,
     );
@@ -468,7 +460,7 @@ fn inv_v() {
         temp.copy_from(poly.as_ref());
         temp.mul_monomial_assign(party_count, CommitModulus);
 
-        let mut p = Polynomial(ArrayBase(poly));
+        let mut p = Polynomial(poly);
 
         p.sub_assign(&temp, CommitModulus);
         p.mul_scalar_assign(inv_two, CommitModulus);

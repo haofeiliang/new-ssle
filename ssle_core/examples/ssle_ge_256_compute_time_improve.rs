@@ -6,7 +6,7 @@ use std::{sync::Arc, time::Duration};
 use clap::Parser;
 use itertools::izip;
 use primus_factor::ShoupFactor;
-use primus_fhe_core::{CrtGlweTraceContext, DcrtGlweCiphertext, DcrtGlweDecryptContext};
+use primus_fhe_core::{CrtGlweTraceContext, DcrtGlweDecryptContext};
 use primus_integer::AsInto;
 use primus_lattice::{
     context::DcrtGlevContext,
@@ -79,7 +79,7 @@ fn check_args(args: Args) -> (usize, SsleParameters) {
     };
 
     let params = if party_count <= 128 || party_count > 2048 {
-        panic!("This example is for party coutn >= 256!")
+        panic!("This example is for party count >= 256!")
     } else {
         if GT128 {
             SsleParameters::new(party_count)
@@ -167,10 +167,9 @@ fn party_operation(
         poly_for_div_v.copy_from(poly.as_ref());
         poly_for_div_v.mul_monomial_assign(party_count, CommitModulus);
 
-        let mut p = Polynomial(ArrayBase(poly));
+        let mut p = Polynomial(poly);
 
         p.sub_assign(&poly_for_div_v, CommitModulus);
-        // p.mul_scalar_assign(inv_two, CommitModulus);
         p.mul_factor_assign(inv_two_factor, CommitModulus.value_unchecked());
     };
 
@@ -179,7 +178,7 @@ fn party_operation(
 
     let all_degree: Vec<usize> = rng
         .sample_iter(uniform_ring_poly_length)
-        .take(party_count)
+        .take(128)
         .collect();
 
     let choose = all_degree.iter().sum::<usize>() % party_count;
@@ -228,7 +227,7 @@ fn party_operation(
         .chunks_exact_mut(rns_glwe_len)
         .skip(2)
         .for_each(|ecs| {
-            msk.encrypt_zeros_inplace(&mut DcrtGlwe::new(ArrayBase(ecs)), ring_params, table, rng);
+            msk.encrypt_zeros_inplace(&mut DcrtGlwe(ecs), ring_params, table, rng);
         });
 
     let encode_commits = &mut all_encode_commits[0..rns_glwe_len * 2];
@@ -275,13 +274,13 @@ fn party_operation(
         all_commit_pk.iter(),
         all_rr_commit.iter_mut(),
     ) {
-        let mut output = NttRlwe::new(ArrayBase(rr_commit.as_mut()));
+        let mut output = NttRlwe(rr_commit.as_mut());
         commit_pk.encrypt_zeros_inplace(&mut output, commit_params, &commit_ntt_table, rng);
 
         output
             .iter_ntt_poly_mut(commit_poly_length)
             .for_each(|poly| {
-                commit_ntt_table.inverse_transform_slice(poly);
+                commit_ntt_table.inverse_transform_slice(poly.0);
             });
 
         rr_commit.add_element_wise_assign(commit, CommitModulus);
@@ -297,7 +296,7 @@ fn party_operation(
                 .for_each(|(encode_commit, poly)| {
                     temp.fill(0);
                     temp.iter_mut()
-                        .zip(poly)
+                        .zip(poly.iter())
                         .for_each(|(x, y)| *x = *y as CrtValueT);
                     base_q.wrapping_decompose_small_values_inplace(
                         &temp,
@@ -306,13 +305,12 @@ fn party_operation(
                         CommitModulus.value_unchecked().as_into(),
                     );
                     table.transform_slice(msg.as_mut());
-                    DcrtGlwe::new(ArrayBase(encode_commit))
-                        .add_dcrt_glwe_mul_dcrt_polynomial_assign(
-                            selector,
-                            &msg,
-                            ring_poly_length,
-                            ring_params.cipher_moduli(),
-                        );
+                    DcrtGlwe(encode_commit).add_dcrt_glwe_mul_dcrt_polynomial_assign(
+                        selector,
+                        &msg,
+                        ring_poly_length,
+                        ring_params.cipher_moduli(),
+                    );
                 });
         });
 
@@ -324,8 +322,8 @@ fn party_operation(
             ecs.chunks_exact(rns_glwe_len)
                 .zip(final_encode_commits.chunks_exact_mut(rns_glwe_len))
                 .for_each(|(x, y)| {
-                    DcrtGlwe::new(ArrayBase(y)).add_element_wise_assign(
-                        &DcrtGlwe::new(ArrayBase(x)),
+                    DcrtGlwe(y).add_element_wise_assign(
+                        &DcrtGlwe(x),
                         ring_poly_length,
                         rns_poly_len,
                         ring_params.cipher_moduli(),
@@ -375,7 +373,7 @@ fn party_operation(
         }
     }
 
-    let cipher = Rlwe::new(ArrayBase(decoded_commit));
+    let cipher = Rlwe(decoded_commit);
     let cipher = cipher.into_ntt_form(&commit_ntt_table);
 
     let msgs = all_commit_sk[choose].decrypt(&cipher, commit_params, &commit_ntt_table);
@@ -426,8 +424,8 @@ fn sim_thfhe_decrypt(
         .zip(encoded_commits.chunks_exact(mid))
     {
         msk.decrypt_inplace(
-            &DcrtGlweCiphertext::new(ArrayBase(encoded_commit)),
-            &mut Polynomial(ArrayBase(poly)),
+            &DcrtGlwe(encoded_commit),
+            &mut Polynomial(poly),
             params.ring_params(),
             msk.table(),
             &mut context,
