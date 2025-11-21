@@ -1,0 +1,16 @@
+[package]
+name = "network2"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+thiserror = { workspace = true }
+anyhow = "1"
+tokio = { workspace = true }
+bytes = { workspace = true }
+dashmap = { version = "6.1.0", features = ["serde", "rayon", "inline"] }
+rayon = { workspace = true }
+socket2 = "0.6"
+quinn = "0.11"
+rustls = "0.23"
+rcgen = "0.14"
