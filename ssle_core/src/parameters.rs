@@ -31,7 +31,6 @@ pub type CrtTable = primus_ntt::CrtConcrete64Table;
 #[derive(Clone)]
 pub struct SsleParameters {
     commit_params: RlweParameters<u32, CommitModulus>,
-    commit_message_length: usize,
     ring_params: CrtGlweParameters<CrtValueT, BarrettModulus<CrtValueT>>,
     ggsw_params: CrtGgswParameters<CrtValueT, BarrettModulus<CrtValueT>>,
     expand_coeff_params_for_key_gen: CrtGlevParameters<CrtValueT, BarrettModulus<CrtValueT>>,
@@ -43,9 +42,7 @@ const GAMMA: CrtValueT = 2056193;
 
 impl SsleParameters {
     pub fn new(party_count: usize) -> Self {
-        assert!(party_count.is_power_of_two() && party_count >= 2 && party_count <= 2048);
-
-        let commit_message_length = 60;
+        assert!(party_count.is_power_of_two() && (2..=2048).contains(&party_count));
 
         let commit_params = if party_count <= 32 {
             RlweParameters::new(512, 2, CommitModulus, RingSecretKeyType::Ternary, 3.19)
@@ -112,7 +109,6 @@ impl SsleParameters {
 
             Self {
                 commit_params,
-                commit_message_length,
                 ring_params,
                 ggsw_params,
                 expand_coeff_params_for_key_gen,
@@ -179,7 +175,6 @@ impl SsleParameters {
 
             Self {
                 commit_params,
-                commit_message_length,
                 ring_params,
                 ggsw_params,
                 expand_coeff_params_for_key_gen,
@@ -190,10 +185,6 @@ impl SsleParameters {
 
     pub fn commit_params(&self) -> &RlweParameters<u32, CommitModulus> {
         &self.commit_params
-    }
-
-    pub fn commit_message_length(&self) -> usize {
-        self.commit_message_length
     }
 
     pub fn ring_params(&self) -> &CrtGlweParameters<CrtValueT, BarrettModulus<CrtValueT>> {

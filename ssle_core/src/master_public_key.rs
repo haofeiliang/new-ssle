@@ -50,7 +50,7 @@ impl MasterPublicKey {
         self.pk.encrypt_monomial_ggsw(
             &coeff_residues,
             degree,
-            &ggsw_params,
+            ggsw_params,
             self.table.as_ref(),
             rng,
         )
@@ -74,7 +74,7 @@ impl MasterPublicKey {
             &coeff_residues,
             degree,
             result,
-            &ggsw_params,
+            ggsw_params,
             self.table.as_ref(),
             rng,
         );

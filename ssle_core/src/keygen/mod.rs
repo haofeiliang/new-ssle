@@ -28,10 +28,10 @@ impl KeyGen {
         let table = Arc::new(
             CrtTable::new(poly_length.trailing_zeros(), ring_params.cipher_moduli()).unwrap(),
         );
-        let sk = CrtGlweSecretKey::generate(&ring_params, rng);
+        let sk = CrtGlweSecretKey::generate(ring_params, rng);
         let dcrt_sk = DcrtGlweSecretKey::from_coeff_secret_key(&sk, table.as_ref());
 
-        let pk = DcrtGlwePublicKey::new(&dcrt_sk, &ring_params, table.as_ref(), rng);
+        let pk = DcrtGlwePublicKey::new(&dcrt_sk, ring_params, table.as_ref(), rng);
 
         let eck = CoefficientExpansionKey::new(
             params.expand_coeff_params_for_key_gen(),
