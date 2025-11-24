@@ -4,7 +4,7 @@ use primus_fhe_core::{
     CrtGlweParameters, CrtGlweSecretKey, DcrtGlweCiphertext, DcrtGlweDecryptContext,
     DcrtGlweSecretKey,
 };
-use primus_ntt::{Dcrt, DcrtTable};
+use primus_ntt::DcrtTable;
 use primus_poly::{Data, DataMut, Polynomial, RawData};
 use primus_reduce::FieldContext;
 
@@ -59,7 +59,7 @@ impl MasterSecretKey {
         context: &mut DcrtGlweDecryptContext<CrtValueT>,
     ) where
         M: FieldContext<CrtValueT>,
-        Table: DcrtTable<ValueT = CrtValueT> + Dcrt,
+        Table: DcrtTable<ValueT = CrtValueT>,
         A: RawData<Elem = CrtValueT> + Data,
         B: RawData<Elem = CrtValueT> + DataMut,
     {
@@ -76,7 +76,7 @@ impl MasterSecretKey {
     ) -> primus_poly::PolynomialOwned<CrtValueT>
     where
         M: FieldContext<CrtValueT>,
-        Table: DcrtTable<ValueT = CrtValueT> + Dcrt,
+        Table: DcrtTable<ValueT = CrtValueT>,
         A: RawData<Elem = CrtValueT> + Data,
     {
         self.dcrt_sk.decrypt(ciphertext, params, table, context)
@@ -91,7 +91,7 @@ impl MasterSecretKey {
     ) where
         R: rand::Rng + rand::CryptoRng,
         M: FieldContext<CrtValueT>,
-        Table: DcrtTable<ValueT = CrtValueT> + Dcrt,
+        Table: DcrtTable<ValueT = CrtValueT>,
         A: RawData<Elem = CrtValueT> + DataMut,
     {
         self.dcrt_sk

@@ -7,10 +7,8 @@ use primus_lattice::{
     glwe::{CrtGlwe, DcrtGlwe},
     rlwe::NttRlwe,
 };
-use primus_ntt::{Dcrt, Ntt, NttTable};
-use primus_poly::{
-    ArrayBase, Polynomial, PolynomialOwned, crt::CrtPolynomial, dcrt::DcrtPolynomial,
-};
+use primus_ntt::{DcrtTable, NttTable};
+use primus_poly::{ArrayBase, CrtPolynomial, DcrtPolynomial, Polynomial, PolynomialOwned};
 use primus_reduce::Modulus;
 use primus_reduce::ops::*;
 use rand::Rng;

@@ -20,8 +20,8 @@ use primus_lattice::{
     glwe::{CrtGlwe, DcrtGlwe},
     rlwe::{NttRlwe, Rlwe, RlweOwned},
 };
-use primus_ntt::{Dcrt, Ntt, NttTable};
-use primus_poly::{ArrayBase, Polynomial, PolynomialOwned, dcrt::DcrtPolynomial};
+use primus_ntt::{DcrtTable, NttTable};
+use primus_poly::{ArrayBase, DcrtPolynomial, Polynomial, PolynomialOwned};
 use primus_reduce::Modulus;
 use rand::Rng;
 use ssle_core::{
