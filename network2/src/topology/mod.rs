@@ -1,8 +1,12 @@
 use std::net::SocketAddr;
 
 mod quic;
+mod tcp;
 
 use crate::Id;
+
+pub use quic::QuicTree;
+pub use tcp::TcpTree;
 
 /// Represents a participant in the network.
 #[derive(Debug, Copy, Clone, PartialEq)]

@@ -1,29 +1,48 @@
 use quinn::Connection;
+use tokio::io::AsyncWriteExt;
+
+use crate::net_io::TreeNetIO;
+
+use super::Role;
 
 pub struct QuicNetIO {
+    role: Role,
     connection: Connection,
 }
 
 impl QuicNetIO {
-    pub fn new(connection: Connection) -> Self {
-        Self { connection }
+    pub fn new(role: Role, connection: Connection) -> Self {
+        Self { role, connection }
+    }
+
+    pub fn role(&self) -> Role {
+        self.role
+    }
+
+    pub fn connection(&self) -> &Connection {
+        &self.connection
     }
 }
 
-async fn open_bidirectional_stream(connection: Connection) -> anyhow::Result<()> {
-    let (mut send, mut recv) = connection.open_bi().await?;
-    send.write_all(b"test").await?;
-    send.finish()?;
-    let received = recv.read_to_end(10).await?;
-    Ok(())
-}
+impl TreeNetIO for QuicNetIO {
+    async fn share(&self, data: &[u8], buf: &mut [u8]) -> anyhow::Result<()> {
+        let (mut send, mut recv) = match self.role {
+            Role::Server => self.connection.accept_bi().await?,
+            Role::Client => self.connection.open_bi().await?,
+        };
 
-async fn receive_bidirectional_stream(connection: Connection) -> anyhow::Result<()> {
-    while let Ok((mut send, mut recv)) = connection.accept_bi().await {
-        // Because it is a bidirectional stream, we can both send and receive.
-        println!("request: {:?}", recv.read_to_end(50).await?);
-        send.write_all(b"response").await?;
-        send.finish()?;
+        let static_data: &'static [u8] = unsafe { std::mem::transmute(data) };
+
+        let send_task = tokio::spawn(async move {
+            send.write_all(static_data).await?;
+            send.flush().await?;
+            anyhow::Ok(())
+        });
+
+        recv.read_exact(buf).await?;
+
+        send_task.await??;
+
+        Ok(())
     }
-    Ok(())
 }

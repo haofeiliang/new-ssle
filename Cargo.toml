@@ -13,6 +13,7 @@ rayon = "1.11.0"
 itertools = "0.14.0"
 criterion = "0.7"
 indicatif = { version = "0.18", features = ["rayon"] }
+mimalloc = "0.1.47"
 
 primus_integer = { path = "../primus/primus_integer" }
 primus_reduce = { path = "../primus/primus_reduce" }
@@ -38,6 +39,6 @@ lto = true
 codegen-units = 1
 
 [profile.release]
-lto = "thin"
+lto = true
 panic = "abort"
 codegen-units = 1

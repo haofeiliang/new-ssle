@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use quinn::{
-    ClientConfig, Connection, Endpoint, EndpointConfig,
+    ClientConfig, Endpoint, EndpointConfig,
     crypto::rustls::{NoInitialCipherSuite, QuicClientConfig},
     default_runtime,
 };
@@ -13,13 +13,19 @@ use rustls::{
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::Id;
+use crate::{
+    Id, TreeNetIO,
+    net_io::{QuicNetIO, Role},
+};
 
 use super::Participant;
 
 pub struct QuicTree {
+    party_id: Id,
+    party_count: usize,
+    log_n: u32,
     endpoint: Endpoint,
-    connections: Vec<Connection>,
+    connections: Vec<QuicNetIO>,
 }
 
 impl QuicTree {
@@ -48,19 +54,28 @@ impl QuicTree {
             let server = endpoint.clone();
             let conns = connections.clone();
             listen_handle = Some(tokio::spawn(async move {
+                // println!("Party {party_id}: Waiting for Connection Count {client_count}.");
                 while client_count != 0
                     && let Some(conn) = server.accept().await
                 {
+                    // println!("Party {party_id}: Get A Connection.");
                     let connection = conn.await?;
                     let mut recv = connection.accept_uni().await?;
+                    // println!("Party {party_id}: accept_uni.");
                     let peer_id = recv.read_u32().await?;
+
+                    // println!("Party {party_id}: Peer id {peer_id}.");
 
                     let mask = party_id ^ peer_id;
                     assert!(mask.is_power_of_two());
                     let index = mask.trailing_zeros() as usize;
 
                     let mut conns_mut = conns.lock().unwrap();
-                    conns_mut[index] = Some(connection);
+                    if let Some(_) = conns_mut[index] {
+                        panic!("Sever: duplicated connection!")
+                    } else {
+                        conns_mut[index] = Some((Role::Server, connection));
+                    }
                     drop(conns_mut);
 
                     client_count -= 1;
@@ -73,15 +88,22 @@ impl QuicTree {
             for i in 0..log_n {
                 let peer_id = party_id ^ (1 << i);
                 if peer_id < party_id {
+                    // println!("Party {party_id}: Connect to Party {peer_id}.");
                     let connection = endpoint
                         .connect(participants[peer_id as usize].address, "localhost")?
                         .await?;
+                    // println!("Party {party_id}: Connect to Party {peer_id} successfully.");
                     let mut send = connection.open_uni().await?;
+                    // println!("Party {party_id}: open_uni.");
                     send.write_u32(party_id).await?;
                     send.finish()?;
 
                     let mut conns_mut = connections.lock().unwrap();
-                    conns_mut[i as usize] = Some(connection);
+                    if let Some(_) = conns_mut[i as usize] {
+                        panic!("Client: duplicated connection!")
+                    } else {
+                        conns_mut[i as usize] = Some((Role::Client, connection));
+                    }
                 }
             }
         }
@@ -90,15 +112,61 @@ impl QuicTree {
             handle.await??;
         }
 
+        // println!("Party {party_id}: Connect finished.");
+
         let guard = Arc::try_unwrap(connections).unwrap();
 
-        let connections: Vec<Connection> = guard
+        let connections: Vec<QuicNetIO> = guard
             .into_inner()?
             .into_iter()
-            .map(|a| a.unwrap())
+            .map(|a| {
+                let (role, connection) = a.expect("All connections should be established!");
+                QuicNetIO::new(role, connection)
+            })
             .collect();
 
-        todo!()
+        Ok(Self {
+            party_id,
+            party_count,
+            log_n,
+            endpoint,
+            connections,
+        })
+    }
+
+    pub async fn share(&self, data: &mut [u8], chunk_size: usize) -> anyhow::Result<()> {
+        assert_eq!(data.len(), chunk_size * self.party_count);
+
+        let mut part_size = chunk_size;
+        let mut start = part_size * self.party_id as usize;
+        let mut end = start + part_size;
+
+        for net_io in self.connections.iter() {
+            match net_io.role() {
+                Role::Server => end += part_size,
+                Role::Client => start -= part_size,
+            }
+            let part = &mut data[start..end];
+            let (data, buf) = match net_io.role() {
+                Role::Server => part.split_at_mut(part_size),
+                Role::Client => {
+                    let (buf, data) = part.split_at_mut(part_size);
+                    (data, buf)
+                }
+            };
+            net_io.share(data, buf).await?;
+            part_size += part_size;
+        }
+
+        Ok(())
+    }
+
+    pub fn log_n(&self) -> u32 {
+        self.log_n
+    }
+
+    pub fn endpoint(&self) -> &Endpoint {
+        &self.endpoint
     }
 }
 
@@ -119,7 +187,7 @@ fn server_config() -> anyhow::Result<quinn::ServerConfig> {
     )?;
 
     let transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
-    transport_config.max_concurrent_uni_streams(0_u8.into());
+    transport_config.max_concurrent_uni_streams(128_u8.into());
 
     Ok(server_config)
 }

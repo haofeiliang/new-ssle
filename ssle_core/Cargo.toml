@@ -24,7 +24,7 @@ bytemuck = { workspace = true }
 bytes = { workspace = true }
 
 [dev-dependencies]
-mimalloc = "0.1.47"
+mimalloc = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 num_cpus = "1"
 crossbeam-channel = "0.5.15"

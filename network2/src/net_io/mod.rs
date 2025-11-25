@@ -1,15 +1,20 @@
-use crate::NetIoResult;
-
 mod quic;
+mod tcp;
+
+#[derive(Debug, Clone, Copy)]
+pub enum Role {
+    Server,
+    Client,
+}
 
 /// Network IO trait
-pub trait NetIO {
-    /// Send data to a party.
-    fn send(&self, data: &[u8]) -> impl Future<Output = NetIoResult<()>>;
-
-    /// Receive data from a party.
-    fn recv(&self, buf: &mut [u8]) -> impl Future<Output = NetIoResult<usize>>;
-
-    /// Flush the send buffer.
-    fn flush(&self) -> impl Future<Output = NetIoResult<()>>;
+pub trait TreeNetIO {
+    fn share(
+        &self,
+        data: &[u8],
+        buf: &mut [u8],
+    ) -> impl std::future::Future<Output = anyhow::Result<()>>;
 }
+
+pub use quic::QuicNetIO;
+pub use tcp::TcpNetIO;
