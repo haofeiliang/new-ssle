@@ -4,7 +4,7 @@ use rand::RngCore;
 
 const BASE_PORT: u16 = 8080;
 
-const CHUNK_SIZE: usize = 600 * 1024;
+const CHUNK_SIZE: usize = 2000 * 1024;
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;

@@ -46,7 +46,13 @@ impl QuicTree {
         endpoint.set_default_client_config(client_config);
 
         let log_n = party_count.trailing_zeros();
-        let connections = Arc::new(Mutex::new(vec![None; log_n as usize]));
+        let connections = Arc::new(Mutex::new(Vec::with_capacity(log_n as usize)));
+
+        let mut temp = connections.lock().unwrap();
+        for _i in 0..log_n {
+            temp.push(None);
+        }
+        drop(temp);
 
         let mut client_count = log_n as usize - party_id.count_ones() as usize;
         let mut listen_handle = None;
@@ -60,7 +66,7 @@ impl QuicTree {
                 {
                     // println!("Party {party_id}: Get A Connection.");
                     let connection = conn.await?;
-                    let mut recv = connection.accept_uni().await?;
+                    let (send, mut recv) = connection.accept_bi().await?;
                     // println!("Party {party_id}: accept_uni.");
                     let peer_id = recv.read_u32().await?;
 
@@ -74,7 +80,7 @@ impl QuicTree {
                     if let Some(_) = conns_mut[index] {
                         panic!("Sever: duplicated connection!")
                     } else {
-                        conns_mut[index] = Some((Role::Server, connection));
+                        conns_mut[index] = Some((Role::Server, connection, send, recv));
                     }
                     drop(conns_mut);
 
@@ -93,16 +99,15 @@ impl QuicTree {
                         .connect(participants[peer_id as usize].address, "localhost")?
                         .await?;
                     // println!("Party {party_id}: Connect to Party {peer_id} successfully.");
-                    let mut send = connection.open_uni().await?;
+                    let (mut send, recv) = connection.open_bi().await?;
                     // println!("Party {party_id}: open_uni.");
                     send.write_u32(party_id).await?;
-                    send.finish()?;
 
                     let mut conns_mut = connections.lock().unwrap();
                     if let Some(_) = conns_mut[i as usize] {
                         panic!("Client: duplicated connection!")
                     } else {
-                        conns_mut[i as usize] = Some((Role::Client, connection));
+                        conns_mut[i as usize] = Some((Role::Client, connection, send, recv));
                     }
                 }
             }
@@ -120,8 +125,9 @@ impl QuicTree {
             .into_inner()?
             .into_iter()
             .map(|a| {
-                let (role, connection) = a.expect("All connections should be established!");
-                QuicNetIO::new(role, connection)
+                let (role, connection, send, recv) =
+                    a.expect("All connections should be established!");
+                QuicNetIO::new(role, connection, send, recv)
             })
             .collect();
 
@@ -187,7 +193,8 @@ fn server_config() -> anyhow::Result<quinn::ServerConfig> {
     )?;
 
     let transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
-    transport_config.max_concurrent_uni_streams(128_u8.into());
+    // transport_config.max_concurrent_uni_streams(128_u8.into());
+    transport_config.max_concurrent_bidi_streams(128_u8.into());
 
     Ok(server_config)
 }
