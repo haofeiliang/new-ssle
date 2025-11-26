@@ -1,13 +1,19 @@
+use std::{
+    fs::File,
+    io::{BufRead, BufReader, BufWriter},
+    path::PathBuf,
+};
+
 use clap::Parser;
+use mimalloc::MiMalloc;
 use network2::{Id, Participant, TcpTree};
 use rand::RngCore;
 
 const BASE_PORT: u16 = 8080;
-
-const CHUNK_SIZE: usize = 600 * 1024;
+const ITER_COUNT: u32 = 30;
 
 #[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+static GLOBAL: MiMalloc = MiMalloc;
 
 #[derive(Parser)]
 struct Cli {
@@ -15,6 +21,10 @@ struct Cli {
     id: Id,
     #[arg(short, long)]
     party_count: usize,
+    #[arg(short, long)]
+    config_path: Option<PathBuf>,
+    #[arg(short, long)]
+    suffix: Option<String>,
 }
 
 #[tokio::main]
@@ -24,36 +34,95 @@ async fn main() -> anyhow::Result<()> {
     let id = args.id;
     let party_count = args.party_count;
 
-    let mut data = vec![0u8; CHUNK_SIZE * party_count];
+    let suffix = if let Some(suffix) = args.suffix {
+        suffix
+    } else {
+        String::from("none")
+    };
 
-    data.chunks_exact_mut(CHUNK_SIZE)
-        .skip(id as usize)
-        .take(1)
-        .for_each(|part| {
-            let mut rng = rand::rng();
-            rng.fill_bytes(part);
-        });
+    let mut data = Vec::new();
 
-    let parties = Participant::from_default(party_count, BASE_PORT);
+    let (parties, chunk_sizes) = if let Some(path) = args.config_path {
+        let file = File::open(path)?;
+        let mut reader = BufReader::new(file);
+        let parties = Participant::from_reader(&mut reader, BASE_PORT)?;
+
+        let mut line = String::new();
+        reader.read_line(&mut line)?;
+
+        let mut iter = line.split_whitespace().map(|s| s.parse::<usize>());
+
+        let a = iter.next().unwrap()?;
+        let b = iter.next().unwrap()?;
+
+        (parties, [a * 1024, b * 1024])
+    } else {
+        (
+            Participant::from_default(party_count, BASE_PORT),
+            [600 * 1024, 200 * 1024],
+        )
+    };
 
     // println!("Party {id}: {parties:?}");
 
     let tcp_tree = TcpTree::new(id, parties).await?;
 
-    tcp_tree.share(&mut data, CHUNK_SIZE).await?;
+    let mut result = [0.0; 2];
 
-    let start_time = std::time::Instant::now();
+    for (i, chunk_size) in chunk_sizes.into_iter().enumerate() {
+        data.resize(chunk_size * party_count, 0);
 
-    for _i in 0..10 {
-        tcp_tree.share(&mut data, CHUNK_SIZE).await?;
-        // println!("Party {id}: Iter {i} finished.");
+        data.chunks_exact_mut(chunk_size)
+            .skip(id as usize)
+            .take(1)
+            .for_each(|part| {
+                let mut rng = rand::rng();
+                rng.fill_bytes(part);
+            });
+
+        tcp_tree.share(&mut data, chunk_size).await?;
+
+        let start_time = std::time::Instant::now();
+
+        for _j in 0..ITER_COUNT {
+            tcp_tree.share(&mut data, chunk_size).await?;
+            // println!("Party {id}: Iter {i} finished.");
+        }
+
+        let duration = start_time.elapsed();
+
+        let avg_time = duration / ITER_COUNT;
+
+        println!("Party {id}: Round {i} Average Time: {avg_time:?}");
+        result[i] = avg_time.as_micros() as f64 / 1000.0;
     }
 
-    let duration = start_time.elapsed();
+    let file = File::create(&format!("p{party_count}_id{id}_tcp_{suffix}.csv"))?;
 
-    let avg_time = duration / 10;
+    let writer = BufWriter::new(file);
 
-    println!("Party {id}: Average Time: {avg_time:?}");
+    let mut wtr = csv::Writer::from_writer(writer);
+
+    wtr.write_record([
+        "Round",
+        "DataSize_KB",
+        "DataSize_Bytes",
+        "Time_ms",
+        "PartyID",
+        "NumParties",
+    ])?;
+    for i in 0..2 {
+        wtr.serialize((
+            i,
+            chunk_sizes[i] >> 10,
+            chunk_sizes[i],
+            result[i],
+            id,
+            party_count,
+        ))?;
+    }
+
+    wtr.flush()?;
 
     Ok(())
 }

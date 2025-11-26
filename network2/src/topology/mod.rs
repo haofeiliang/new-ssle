@@ -1,4 +1,9 @@
-use std::net::SocketAddr;
+use std::{
+    fs::File,
+    io::{BufRead, BufReader},
+    net::{Ipv4Addr, SocketAddr},
+    path::Path,
+};
 
 mod quic;
 mod tcp;
@@ -40,4 +45,52 @@ impl Participant {
             })
             .collect()
     }
+
+    pub fn from_file(file_path: &Path, base_port: u16) -> anyhow::Result<Vec<Self>> {
+        let file = File::open(file_path)?;
+        let mut reader = BufReader::new(file);
+
+        Self::from_reader(&mut reader, base_port)
+    }
+
+    pub fn from_reader(reader: &mut BufReader<File>, base_port: u16) -> anyhow::Result<Vec<Self>> {
+        let mut line = String::new();
+
+        reader.read_line(&mut line)?;
+
+        let party_count = trim_end(&mut line).parse::<usize>()?;
+
+        let mut parties = Vec::with_capacity(party_count);
+
+        let port = |id| {
+            base_port
+                .checked_add(<Id as TryInto<u16>>::try_into(id).unwrap())
+                .unwrap()
+        };
+
+        for i in 0..party_count {
+            line.clear();
+            reader.read_line(&mut line)?;
+            let addr = trim_end(&mut line).parse::<Ipv4Addr>()?;
+
+            let id = i as Id;
+
+            parties.push(Participant {
+                id,
+                address: SocketAddr::from((addr, port(id))),
+            });
+        }
+
+        Ok(parties)
+    }
+}
+
+fn trim_end(buf: &mut String) -> &str {
+    if buf.ends_with('\n') {
+        buf.pop();
+        if buf.ends_with('\r') {
+            buf.pop();
+        }
+    }
+    buf
 }

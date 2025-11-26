@@ -1,5 +1,6 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use parking_lot::Mutex;
 use quinn::{
     ClientConfig, Endpoint, EndpointConfig,
     crypto::rustls::{NoInitialCipherSuite, QuicClientConfig},
@@ -48,7 +49,7 @@ impl QuicTree {
         let log_n = party_count.trailing_zeros();
         let connections = Arc::new(Mutex::new(Vec::with_capacity(log_n as usize)));
 
-        let mut temp = connections.lock().unwrap();
+        let mut temp = connections.lock();
         for _i in 0..log_n {
             temp.push(None);
         }
@@ -76,7 +77,7 @@ impl QuicTree {
                     assert!(mask.is_power_of_two());
                     let index = mask.trailing_zeros() as usize;
 
-                    let mut conns_mut = conns.lock().unwrap();
+                    let mut conns_mut = conns.lock();
                     if let Some(_) = conns_mut[index] {
                         panic!("Sever: duplicated connection!")
                     } else {
@@ -102,8 +103,9 @@ impl QuicTree {
                     let (mut send, recv) = connection.open_bi().await?;
                     // println!("Party {party_id}: open_uni.");
                     send.write_u32(party_id).await?;
+                    send.flush().await?;
 
-                    let mut conns_mut = connections.lock().unwrap();
+                    let mut conns_mut = connections.lock();
                     if let Some(_) = conns_mut[i as usize] {
                         panic!("Client: duplicated connection!")
                     } else {
@@ -122,7 +124,7 @@ impl QuicTree {
         let guard = Arc::try_unwrap(connections).unwrap();
 
         let connections: Vec<QuicNetIO> = guard
-            .into_inner()?
+            .into_inner()
             .into_iter()
             .map(|a| {
                 let (role, connection, send, recv) =

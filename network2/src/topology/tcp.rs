@@ -1,8 +1,6 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use std::sync::Arc;
 
+use parking_lot::Mutex;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::{Id, Role, TreeNetIO, net_io::TcpNetIO};
@@ -26,7 +24,13 @@ impl TcpTree {
 
         let log_n = party_count.trailing_zeros();
 
-        let connections = Arc::new(Mutex::new(HashMap::with_capacity(log_n as usize)));
+        let connections = Arc::new(Mutex::new(Vec::with_capacity(log_n as usize)));
+
+        let mut temp = connections.lock();
+        for _i in 0..log_n {
+            temp.push(None);
+        }
+        drop(temp);
 
         let mut client_count = log_n as usize - party_id.count_ones() as usize;
         let mut listen_handle = None;
@@ -47,8 +51,12 @@ impl TcpTree {
                     assert!(mask.is_power_of_two());
                     let index = mask.trailing_zeros() as usize;
 
-                    let mut conns_mut = conns.lock().unwrap();
-                    conns_mut.entry(index).or_insert((Role::Server, tcp_stream));
+                    let mut conns_mut = conns.lock();
+                    if let Some(_) = conns_mut[index] {
+                        panic!("Sever: duplicated connection!")
+                    } else {
+                        conns_mut[index] = Some((Role::Server, tcp_stream));
+                    }
 
                     drop(conns_mut);
 
@@ -71,10 +79,12 @@ impl TcpTree {
                     tcp_stream.write_u32(party_id).await?;
                     tcp_stream.flush().await?;
 
-                    let mut conns_mut = connections.lock().unwrap();
-                    conns_mut
-                        .entry(i as usize)
-                        .or_insert((Role::Client, tcp_stream));
+                    let mut conns_mut = connections.lock();
+                    if let Some(_) = conns_mut[i as usize] {
+                        panic!("Client: duplicated connection!")
+                    } else {
+                        conns_mut[i as usize] = Some((Role::Client, tcp_stream));
+                    }
                 }
             }
         }
@@ -85,16 +95,14 @@ impl TcpTree {
 
         let guard = Arc::try_unwrap(connections).unwrap();
 
-        let mut connections: Vec<TcpNetIO> = Vec::with_capacity(log_n as usize);
-
-        let mut map = guard.into_inner()?;
-
-        for i in 0..log_n as usize {
-            let Some((role, tcp_stream)) = map.remove(&i) else {
-                panic!()
-            };
-            connections.push(TcpNetIO::new(role, tcp_stream));
-        }
+        let connections = guard
+            .into_inner()
+            .into_iter()
+            .map(|a| {
+                let (role, tcp_stream) = a.expect("All connections should be established!");
+                TcpNetIO::new(role, tcp_stream)
+            })
+            .collect();
 
         Ok(Self {
             party_id,
