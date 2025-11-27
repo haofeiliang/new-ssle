@@ -20,7 +20,7 @@ struct Cli {
     #[arg(short, long)]
     id: Id,
     #[arg(short, long)]
-    party_count: usize,
+    party_count: Option<usize>,
     #[arg(short, long)]
     config_path: Option<PathBuf>,
     #[arg(short, long)]
@@ -32,7 +32,6 @@ async fn main() -> anyhow::Result<()> {
     let args = Cli::parse();
 
     let id = args.id;
-    let party_count = args.party_count;
 
     let suffix = if let Some(suffix) = args.suffix {
         suffix
@@ -57,11 +56,14 @@ async fn main() -> anyhow::Result<()> {
 
         (parties, [a * 1024, b * 1024])
     } else {
+        let party_count = args.party_count.unwrap();
         (
             Participant::from_default(party_count, BASE_PORT),
             [600 * 1024, 200 * 1024],
         )
     };
+
+    let party_count = parties.len();
 
     // println!("Party {id}: {parties:?}");
 
