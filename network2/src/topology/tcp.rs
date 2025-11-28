@@ -1,7 +1,10 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use parking_lot::Mutex;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    time::sleep,
+};
 
 use crate::{Id, Role, TreeNetIO, net_io::TcpNetIO};
 
@@ -48,7 +51,7 @@ impl TcpTree {
                     // println!("Party {party_id}: Peer id {peer_id}.");
 
                     let mask = party_id ^ peer_id;
-                    assert!(mask.is_power_of_two());
+                    assert!(mask.is_power_of_two(), "Party {party_id} vs Peer {peer_id}");
                     let index = mask.trailing_zeros() as usize;
 
                     let mut conns_mut = conns.lock();
@@ -71,9 +74,19 @@ impl TcpTree {
                 let peer_id = party_id ^ (1 << i);
                 if peer_id < party_id {
                     // println!("Party {party_id}: Connect to Party {peer_id}.");
-                    let mut tcp_stream =
-                        tokio::net::TcpStream::connect(participants[peer_id as usize].address)
-                            .await?;
+                    let mut retry_count = 100;
+                    let peer_address = participants[peer_id as usize].address;
+                    let mut tcp_stream = loop {
+                        if let Ok(tcp_stream) = tokio::net::TcpStream::connect(peer_address).await {
+                            break tcp_stream;
+                        } else {
+                            sleep(Duration::from_secs(1)).await
+                        }
+                        retry_count -= 1;
+                        if retry_count == 0 {
+                            panic!("Retry too many times.")
+                        }
+                    };
                     // println!("Party {party_id}: Connect to Party {peer_id} successfully.");
                     tcp_stream.set_nodelay(true)?;
                     tcp_stream.write_u32(party_id).await?;
@@ -141,5 +154,12 @@ impl TcpTree {
 
     pub fn log_n(&self) -> u32 {
         self.log_n
+    }
+
+    pub async fn close(self) -> anyhow::Result<()> {
+        for c in self.connections {
+            c.close().await?
+        }
+        Ok(())
     }
 }

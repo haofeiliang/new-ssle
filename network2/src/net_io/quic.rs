@@ -30,50 +30,16 @@ impl QuicNetIO {
     pub fn connection(&self) -> &Connection {
         &self.connection
     }
+
+    pub fn close(&self) {
+        let _ = self.send.lock().finish();
+        // let _ = self.recv.lock().stop(0u32.into());
+        // self.connection.close(0u32.into(), b"finished");
+    }
 }
 
 impl TreeNetIO for QuicNetIO {
     async fn share(&self, data: &[u8], buf: &mut [u8]) -> anyhow::Result<()> {
-        // let data_chunk_size = data.len() / self.stream_count;
-        // assert_eq!(data_chunk_size * self.stream_count, data.len());
-
-        // let send_tasks: Vec<_> = self
-        //     .send
-        //     .iter()
-        //     .zip(data.chunks_exact(data_chunk_size))
-        //     .map(|(send, data_chunk)| {
-        //         let send_task = async {
-        //             let mut send = send.lock();
-        //             send.write_all(data_chunk).await?;
-        //             send.flush().await?;
-        //             anyhow::Ok(())
-        //         };
-        //         send_task
-        //     })
-        //     .collect();
-
-        // let buf_chunk_size = buf.len() / self.stream_count;
-        // assert_eq!(buf_chunk_size * self.stream_count, data.len());
-
-        // let recv_tasks: Vec<_> = self
-        //     .recv
-        //     .iter()
-        //     .zip(buf.chunks_exact_mut(buf_chunk_size))
-        //     .map(|(recv, buf_chunk)| {
-        //         let recv_task = async {
-        //             let mut recv = recv.lock();
-        //             recv.read_exact(buf_chunk).await?;
-        //             anyhow::Ok(())
-        //         };
-        //         recv_task
-        //     })
-        //     .collect();
-
-        // let send_task = futures::future::try_join_all(send_tasks);
-        // let recv_task = futures::future::try_join_all(recv_tasks);
-
-        // tokio::try_join!(send_task, recv_task)?;
-
         let mut send = self.send.lock();
         let mut recv = self.recv.lock();
 

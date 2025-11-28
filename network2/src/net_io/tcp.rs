@@ -31,6 +31,17 @@ impl TcpNetIO {
     pub fn role(&self) -> Role {
         self.role
     }
+
+    pub async fn close(self) -> anyhow::Result<()> {
+        let mut tcp_stream = self
+            .write_half
+            .into_inner()
+            .reunite(self.read_half.into_inner())?;
+
+        tcp_stream.shutdown().await?;
+
+        Ok(())
+    }
 }
 
 impl TreeNetIO for TcpNetIO {

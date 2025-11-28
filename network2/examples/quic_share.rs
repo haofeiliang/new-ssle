@@ -9,8 +9,7 @@ use mimalloc::MiMalloc;
 use network2::{Id, Participant, QuicTree};
 use rand::RngCore;
 
-const BASE_PORT: u16 = 8080;
-const ITER_COUNT: u32 = 30;
+const ITER_COUNT: u32 = 10;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -23,6 +22,8 @@ struct Cli {
     party_count: Option<usize>,
     #[arg(short, long)]
     config_path: Option<PathBuf>,
+    #[arg(short, long)]
+    base_port: Option<u16>,
     #[arg(short, long)]
     suffix: Option<String>,
 }
@@ -39,12 +40,14 @@ async fn main() -> anyhow::Result<()> {
         String::from("none")
     };
 
+    let base_port = args.base_port.unwrap_or(12367);
+
     let mut data = Vec::new();
 
     let (parties, chunk_sizes) = if let Some(path) = args.config_path {
         let file = File::open(path)?;
         let mut reader = BufReader::new(file);
-        let parties = Participant::from_reader(&mut reader, BASE_PORT)?;
+        let parties = Participant::from_reader(&mut reader, base_port)?;
 
         let mut line = String::new();
         reader.read_line(&mut line)?;
@@ -58,7 +61,7 @@ async fn main() -> anyhow::Result<()> {
     } else {
         let party_count = args.party_count.unwrap();
         (
-            Participant::from_default(party_count, BASE_PORT),
+            Participant::from_default(party_count, base_port),
             [600 * 1024, 200 * 1024],
         )
     };
@@ -84,7 +87,7 @@ async fn main() -> anyhow::Result<()> {
 
         quic_tree.share(&mut data, chunk_size).await?;
 
-        let start_time = std::time::Instant::now();
+        let start_time = quanta::Instant::now();
 
         for _j in 0..ITER_COUNT {
             quic_tree.share(&mut data, chunk_size).await?;
@@ -95,7 +98,7 @@ async fn main() -> anyhow::Result<()> {
 
         let avg_time = duration / ITER_COUNT;
 
-        println!("Party {id}: Round {i} Average Time: {avg_time:?}");
+        // println!("Party {id}: Round {i} Average Time: {avg_time:?}");
         result[i] = avg_time.as_micros() as f64 / 1000.0;
     }
 
@@ -125,6 +128,10 @@ async fn main() -> anyhow::Result<()> {
     }
 
     wtr.flush()?;
+
+    quic_tree.close().await;
+
+    // sleep(Duration::from_secs(1)).await;
 
     Ok(())
 }

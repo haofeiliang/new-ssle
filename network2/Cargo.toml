@@ -14,7 +14,6 @@ rustls = { version = "0.23", default-features = false, features = [
     "ring",
 ] }
 rcgen = "0.14"
-futures = "0.3.31"
 parking_lot = "0.12.5"
 
 [dev-dependencies]
@@ -22,3 +21,4 @@ clap = { version = "4.5.53", features = ["derive"] }
 rand = { workspace = true }
 mimalloc = { workspace = true }
 csv = "1.4"
+quanta = "0.12.6"

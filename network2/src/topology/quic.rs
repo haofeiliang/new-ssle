@@ -74,7 +74,7 @@ impl QuicTree {
                     // println!("Party {party_id}: Peer id {peer_id}.");
 
                     let mask = party_id ^ peer_id;
-                    assert!(mask.is_power_of_two());
+                    assert!(mask.is_power_of_two(), "Party {party_id} vs Peer {peer_id}");
                     let index = mask.trailing_zeros() as usize;
 
                     let mut conns_mut = conns.lock();
@@ -175,6 +175,15 @@ impl QuicTree {
 
     pub fn endpoint(&self) -> &Endpoint {
         &self.endpoint
+    }
+
+    pub async fn close(&self) {
+        for c in self.connections.iter() {
+            c.close();
+        }
+
+        self.endpoint.wait_idle().await;
+        self.endpoint.close(0u32.into(), b"finished");
     }
 }
 
