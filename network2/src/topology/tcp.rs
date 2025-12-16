@@ -1,8 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
-use parking_lot::Mutex;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
+    sync::Mutex,
     time::sleep,
 };
 
@@ -29,7 +29,7 @@ impl TcpTree {
 
         let connections = Arc::new(Mutex::new(Vec::with_capacity(log_n as usize)));
 
-        let mut temp = connections.lock();
+        let mut temp = connections.lock().await;
         for _i in 0..log_n {
             temp.push(None);
         }
@@ -54,8 +54,8 @@ impl TcpTree {
                     assert!(mask.is_power_of_two(), "Party {party_id} vs Peer {peer_id}");
                     let index = mask.trailing_zeros() as usize;
 
-                    let mut conns_mut = conns.lock();
-                    if let Some(_) = conns_mut[index] {
+                    let mut conns_mut = conns.lock().await;
+                    if conns_mut[index].is_some() {
                         panic!("Sever: duplicated connection!")
                     } else {
                         conns_mut[index] = Some((Role::Server, tcp_stream));
@@ -92,8 +92,8 @@ impl TcpTree {
                     tcp_stream.write_u32(party_id).await?;
                     tcp_stream.flush().await?;
 
-                    let mut conns_mut = connections.lock();
-                    if let Some(_) = conns_mut[i as usize] {
+                    let mut conns_mut = connections.lock().await;
+                    if conns_mut[i as usize].is_some() {
                         panic!("Client: duplicated connection!")
                     } else {
                         conns_mut[i as usize] = Some((Role::Client, tcp_stream));

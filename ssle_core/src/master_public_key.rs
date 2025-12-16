@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use primus_fhe_core::{DcrtGlwePublicKey, NttRlwePublicKey, NttRlweSecretKey, RlweSecretKey};
+use primus_integer::{DataMut, RawData};
 use primus_lattice::{ggsw::DcrtGgsw, glwe::CrtGlwe};
-use primus_poly::{DataMut, RawData};
 
 use crate::{CommitTable, CommitValueT, CrtTable, CrtValueT, SsleParameters};
 

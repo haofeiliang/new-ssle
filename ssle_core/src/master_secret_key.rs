@@ -4,8 +4,9 @@ use primus_fhe_core::{
     CrtGlweParameters, CrtGlweSecretKey, DcrtGlweCiphertext, DcrtGlweDecryptContext,
     DcrtGlweSecretKey,
 };
+use primus_integer::{Data, DataMut, RawData};
 use primus_ntt::DcrtTable;
-use primus_poly::{Data, DataMut, Polynomial, RawData};
+use primus_poly::Polynomial;
 use primus_reduce::FieldContext;
 
 use crate::{CrtTable, CrtValueT, SsleParameters};

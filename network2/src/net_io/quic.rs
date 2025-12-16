@@ -1,6 +1,5 @@
-use parking_lot::Mutex;
 use quinn::{Connection, RecvStream, SendStream};
-use tokio::io::AsyncWriteExt;
+use tokio::{io::AsyncWriteExt, sync::Mutex};
 
 use crate::net_io::TreeNetIO;
 
@@ -31,8 +30,8 @@ impl QuicNetIO {
         &self.connection
     }
 
-    pub fn close(&self) {
-        let _ = self.send.lock().finish();
+    pub async fn close(&self) {
+        let _ = self.send.lock().await.finish();
         // let _ = self.recv.lock().stop(0u32.into());
         // self.connection.close(0u32.into(), b"finished");
     }
@@ -40,8 +39,8 @@ impl QuicNetIO {
 
 impl TreeNetIO for QuicNetIO {
     async fn share(&self, data: &[u8], buf: &mut [u8]) -> anyhow::Result<()> {
-        let mut send = self.send.lock();
-        let mut recv = self.recv.lock();
+        let mut send = self.send.lock().await;
+        let mut recv = self.recv.lock().await;
 
         let send_task = async {
             send.write_all(data).await?;

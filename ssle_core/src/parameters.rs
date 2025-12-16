@@ -55,16 +55,17 @@ impl SsleParameters {
 
             let moduli = rns_moduli.map(BarrettModulus::new).to_vec();
             let rns_base = RNSBase::new(&moduli).unwrap();
-            let modulus = rns_base.moduli_product().to_vec();
+            let moduli_product = rns_base.moduli_product();
+            let modulus = moduli_product.digits();
 
             let basis = match party_count {
-                2 => BigUintApproxSignedBasis::new(&modulus, 23, Some(3), &rns_base),
-                4 => BigUintApproxSignedBasis::new(&modulus, 23, Some(3), &rns_base),
-                8 => BigUintApproxSignedBasis::new(&modulus, 23, Some(3), &rns_base),
-                16 => BigUintApproxSignedBasis::new(&modulus, 18, Some(4), &rns_base),
-                32 => BigUintApproxSignedBasis::new(&modulus, 18, Some(4), &rns_base),
-                64 => BigUintApproxSignedBasis::new(&modulus, 15, Some(5), &rns_base),
-                128 => BigUintApproxSignedBasis::new(&modulus, 13, Some(6), &rns_base),
+                2 => BigUintApproxSignedBasis::new(modulus, 23, Some(3), &rns_base),
+                4 => BigUintApproxSignedBasis::new(modulus, 23, Some(3), &rns_base),
+                8 => BigUintApproxSignedBasis::new(modulus, 23, Some(3), &rns_base),
+                16 => BigUintApproxSignedBasis::new(modulus, 18, Some(4), &rns_base),
+                32 => BigUintApproxSignedBasis::new(modulus, 18, Some(4), &rns_base),
+                64 => BigUintApproxSignedBasis::new(modulus, 15, Some(5), &rns_base),
+                128 => BigUintApproxSignedBasis::new(modulus, 13, Some(6), &rns_base),
                 _ => unreachable!(),
             };
 
@@ -91,13 +92,13 @@ impl SsleParameters {
             let ggsw_params = CrtGgswParameters::with_glwe_params(&basic_ring_params, basis);
 
             let basis = match party_count {
-                2 => BigUintApproxSignedBasis::new(&modulus, 33, Some(2), &rns_base),
-                4 => BigUintApproxSignedBasis::new(&modulus, 25, Some(3), &rns_base),
-                8 => BigUintApproxSignedBasis::new(&modulus, 25, Some(3), &rns_base),
-                16 => BigUintApproxSignedBasis::new(&modulus, 25, Some(3), &rns_base),
-                32 => BigUintApproxSignedBasis::new(&modulus, 20, Some(4), &rns_base),
-                64 => BigUintApproxSignedBasis::new(&modulus, 16, Some(5), &rns_base),
-                128 => BigUintApproxSignedBasis::new(&modulus, 16, Some(5), &rns_base),
+                2 => BigUintApproxSignedBasis::new(modulus, 33, Some(2), &rns_base),
+                4 => BigUintApproxSignedBasis::new(modulus, 25, Some(3), &rns_base),
+                8 => BigUintApproxSignedBasis::new(modulus, 25, Some(3), &rns_base),
+                16 => BigUintApproxSignedBasis::new(modulus, 25, Some(3), &rns_base),
+                32 => BigUintApproxSignedBasis::new(modulus, 20, Some(4), &rns_base),
+                64 => BigUintApproxSignedBasis::new(modulus, 16, Some(5), &rns_base),
+                128 => BigUintApproxSignedBasis::new(modulus, 16, Some(5), &rns_base),
                 _ => unreachable!(),
             };
 

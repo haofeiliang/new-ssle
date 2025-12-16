@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use parking_lot::Mutex;
 use quinn::{
     ClientConfig, Endpoint, EndpointConfig,
     crypto::rustls::{NoInitialCipherSuite, QuicClientConfig},
@@ -12,7 +11,10 @@ use rustls::{
     crypto::CryptoProvider,
     pki_types::{CertificateDer, PrivatePkcs8KeyDer, ServerName, UnixTime},
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    sync::Mutex,
+};
 
 use crate::{
     Id, TreeNetIO,
@@ -49,7 +51,7 @@ impl QuicTree {
         let log_n = party_count.trailing_zeros();
         let connections = Arc::new(Mutex::new(Vec::with_capacity(log_n as usize)));
 
-        let mut temp = connections.lock();
+        let mut temp = connections.lock().await;
         for _i in 0..log_n {
             temp.push(None);
         }
@@ -77,8 +79,8 @@ impl QuicTree {
                     assert!(mask.is_power_of_two(), "Party {party_id} vs Peer {peer_id}");
                     let index = mask.trailing_zeros() as usize;
 
-                    let mut conns_mut = conns.lock();
-                    if let Some(_) = conns_mut[index] {
+                    let mut conns_mut = conns.lock().await;
+                    if conns_mut[index].is_some() {
                         panic!("Sever: duplicated connection!")
                     } else {
                         conns_mut[index] = Some((Role::Server, connection, send, recv));
@@ -105,8 +107,8 @@ impl QuicTree {
                     send.write_u32(party_id).await?;
                     send.flush().await?;
 
-                    let mut conns_mut = connections.lock();
-                    if let Some(_) = conns_mut[i as usize] {
+                    let mut conns_mut = connections.lock().await;
+                    if conns_mut[i as usize].is_some() {
                         panic!("Client: duplicated connection!")
                     } else {
                         conns_mut[i as usize] = Some((Role::Client, connection, send, recv));
@@ -179,7 +181,7 @@ impl QuicTree {
 
     pub async fn close(&self) {
         for c in self.connections.iter() {
-            c.close();
+            c.close().await;
         }
 
         self.endpoint.wait_idle().await;

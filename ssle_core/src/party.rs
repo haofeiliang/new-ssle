@@ -7,8 +7,8 @@ use network::{
 };
 use primus_factor::ShoupFactor;
 use primus_fhe_core::{NttRlwePublicKey, NttRlweSecretKey};
-use primus_integer::{AsInto, UnsignedInteger};
-use primus_lattice::glwe::CrtGlwe;
+use primus_integer::{AsInto, DataMut, RawData, UnsignedInteger};
+use primus_lattice::{ggsw::DcrtGgsw, glwe::CrtGlwe};
 use primus_reduce::{Modulus, ops::ReduceInv};
 use tokio::runtime::Runtime;
 
@@ -111,7 +111,7 @@ impl Party {
         &self,
         degree: usize,
         rng: &mut R,
-    ) -> primus_lattice::ggsw::DcrtGgsw<Vec<crate::CrtValueT>>
+    ) -> DcrtGgsw<Vec<crate::CrtValueT>>
     where
         R: rand::Rng + rand::CryptoRng,
     {
@@ -121,11 +121,11 @@ impl Party {
     pub fn generate_rotate_rgsw_inplace<R, A>(
         &self,
         degree: usize,
-        result: &mut primus_lattice::ggsw::DcrtGgsw<A>,
+        result: &mut DcrtGgsw<A>,
         rng: &mut R,
     ) where
         R: rand::Rng + rand::CryptoRng,
-        A: primus_poly::RawData<Elem = crate::CrtValueT> + primus_poly::DataMut,
+        A: RawData<Elem = crate::CrtValueT> + DataMut,
     {
         self.mpk.generate_rotate_rgsw_inplace(degree, result, rng)
     }

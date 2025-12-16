@@ -4,9 +4,9 @@ use primus_fhe_core::{
     CrtGlevParameters, CrtGlweCiphertext, CrtGlweSecretKey, CrtGlweTraceContext, CrtGlweTraceKey,
     DcrtGlwePublicKey, DcrtGlweSecretKey,
 };
+use primus_integer::{Data, DataMut, RawData};
 use primus_modulus::BarrettModulus;
 use primus_ntt::DcrtTable;
-use primus_poly::{Data, DataMut, RawData};
 use primus_reduce::FieldContext;
 use primus_rns::RNSBase;
 
