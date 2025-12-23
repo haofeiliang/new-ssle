@@ -2,7 +2,7 @@ use primus_decompose::big_integer::BigUintApproxSignedBasis;
 use primus_fhe_core::{
     CrtGgswParameters, CrtGlevParameters, CrtGlweParameters, RingSecretKeyType, RlweParameters,
 };
-use primus_modulus::{Barrett, BarrettModulus, integer::multiply_many_values, reduce::Modulus};
+use primus_modulus::{Barrett, BarrettModulus, reduce::Modulus};
 use primus_rns::RNSBase;
 
 #[cfg(feature = "gt128")]
@@ -55,8 +55,7 @@ impl SsleParameters {
 
             let moduli = rns_moduli.map(BarrettModulus::new).to_vec();
             let rns_base = RNSBase::new(&moduli).unwrap();
-            let moduli_product = rns_base.moduli_product();
-            let modulus = moduli_product.digits();
+            let modulus = rns_base.moduli_product();
 
             let basis = match party_count {
                 2 => BigUintApproxSignedBasis::new(modulus, 23, Some(3), &rns_base),
@@ -123,23 +122,23 @@ impl SsleParameters {
             } else {
                 ([137438822401, 137438814209, 137438773249], 22.4)
             };
-            let modulus = multiply_many_values(&rns_moduli);
             let moduli = rns_moduli.map(BarrettModulus::new).to_vec();
             let rns_base = RNSBase::new(&moduli).unwrap();
+            let modulus = rns_base.moduli_product();
 
             let poly_length = 4096;
-            let dimmension = 1;
+            let dimension = 1;
 
             let basis = match party_count {
-                256 => BigUintApproxSignedBasis::new(&modulus, 17, Some(5), &rns_base),
-                512 => BigUintApproxSignedBasis::new(&modulus, 17, Some(5), &rns_base),
-                1024 => BigUintApproxSignedBasis::new(&modulus, 14, Some(6), &rns_base),
-                2048 => BigUintApproxSignedBasis::new(&modulus, 13, Some(7), &rns_base),
+                256 => BigUintApproxSignedBasis::new(modulus, 17, Some(5), &rns_base),
+                512 => BigUintApproxSignedBasis::new(modulus, 17, Some(5), &rns_base),
+                1024 => BigUintApproxSignedBasis::new(modulus, 14, Some(6), &rns_base),
+                2048 => BigUintApproxSignedBasis::new(modulus, 13, Some(7), &rns_base),
                 _ => unreachable!(),
             };
 
             let ring_params = CrtGlweParameters::new(
-                dimmension,
+                dimension,
                 poly_length,
                 BarrettModulus::new(CommitModulus.value_unchecked() as CrtValueT),
                 BarrettModulus::new(GAMMA),
@@ -149,7 +148,7 @@ impl SsleParameters {
             );
 
             let basic_ring_params = CrtGlweParameters::new(
-                dimmension,
+                dimension,
                 poly_length,
                 BarrettModulus::new(CommitModulus.value_unchecked() as CrtValueT),
                 BarrettModulus::new(GAMMA),
@@ -161,10 +160,10 @@ impl SsleParameters {
             let ggsw_params = CrtGgswParameters::with_glwe_params(&basic_ring_params, basis);
 
             let basis = match party_count {
-                256 => BigUintApproxSignedBasis::new(&modulus, 21, Some(4), &rns_base),
-                512 => BigUintApproxSignedBasis::new(&modulus, 18, Some(5), &rns_base),
-                1024 => BigUintApproxSignedBasis::new(&modulus, 15, Some(6), &rns_base),
-                2048 => BigUintApproxSignedBasis::new(&modulus, 15, Some(6), &rns_base),
+                256 => BigUintApproxSignedBasis::new(modulus, 21, Some(4), &rns_base),
+                512 => BigUintApproxSignedBasis::new(modulus, 18, Some(5), &rns_base),
+                1024 => BigUintApproxSignedBasis::new(modulus, 15, Some(6), &rns_base),
+                2048 => BigUintApproxSignedBasis::new(modulus, 15, Some(6), &rns_base),
                 _ => unreachable!(),
             };
 
