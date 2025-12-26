@@ -5,19 +5,16 @@ use primus_fhe_core::{
 use primus_modulus::{Barrett, BarrettModulus, reduce::Modulus};
 use primus_rns::RNSBase;
 
-#[cfg(feature = "gt128")]
 #[derive(Barrett)]
-#[modulus(u32, value = 40961)]
-pub struct CommitModulus;
-
-#[cfg(all(not(feature = "gt128"), feature = "gt32"))]
-#[derive(Barrett)]
-#[modulus(u32, value = 18433)]
-pub struct CommitModulus;
-
-#[cfg(all(not(feature = "gt128"), not(feature = "gt32")))]
-#[derive(Barrett)]
-#[modulus(u32, value = 12289)]
+#[cfg_attr(
+    all(not(feature = "gt128"), not(feature = "gt32")),
+    modulus(u32, value = 12289)
+)]
+#[cfg_attr(
+    all(not(feature = "gt128"), feature = "gt32"),
+    modulus(u32, value = 18433)
+)]
+#[cfg_attr(feature = "gt128", modulus(u32, value = 40961))]
 pub struct CommitModulus;
 
 pub type CommitValueT = u32;
