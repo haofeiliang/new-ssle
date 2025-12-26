@@ -8,13 +8,13 @@ use primus_rns::RNSBase;
 #[derive(Barrett)]
 #[cfg_attr(
     all(not(feature = "gt128"), not(feature = "gt32")),
-    modulus(u32, value = 12289)
+    modulus(ty = u32, value = 12289)
 )]
 #[cfg_attr(
     all(not(feature = "gt128"), feature = "gt32"),
-    modulus(u32, value = 18433)
+    modulus(ty = u32, value = 18433)
 )]
-#[cfg_attr(feature = "gt128", modulus(u32, value = 40961))]
+#[cfg_attr(feature = "gt128", modulus(ty = u32, value = 40961))]
 pub struct CommitModulus;
 
 pub type CommitValueT = u32;
