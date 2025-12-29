@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{
@@ -7,7 +9,7 @@ use tokio::{
     sync::Mutex,
 };
 
-use crate::TreeNetIO;
+use crate::{PairWiseNetIO, TreeNetIO};
 
 use super::Role;
 
@@ -60,5 +62,19 @@ impl TreeNetIO for TcpNetIO {
         tokio::try_join!(send_task, recv_task)?;
 
         Ok(())
+    }
+}
+
+impl PairWiseNetIO for TcpNetIO {
+    async fn send(self: Arc<Self>, data: &[u8]) -> anyhow::Result<()> {
+        let mut write_half_mut = self.write_half.lock().await;
+        write_half_mut.write_all(data).await?;
+        write_half_mut.flush().await?;
+        anyhow::Ok(())
+    }
+
+    async fn recv(self: Arc<Self>, data: &mut [u8]) -> anyhow::Result<()> {
+        self.read_half.lock().await.read_exact(data).await?;
+        anyhow::Ok(())
     }
 }

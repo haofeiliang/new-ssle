@@ -1,12 +1,13 @@
 use std::{
     fs::File,
     io::{BufRead, BufReader, BufWriter},
+    mem::transmute,
     path::PathBuf,
 };
 
 use clap::Parser;
 use mimalloc::MiMalloc;
-use network2::{Id, Participant, TcpTree};
+use network2::{Id, Participant, TcpPairWise};
 use rand::RngCore;
 
 const ITER_COUNT: u32 = 10;
@@ -40,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
         String::from("none")
     };
 
-    let base_port = args.base_port.unwrap_or(12367);
+    let base_port = args.base_port.unwrap_or(22367);
 
     let mut data = Vec::new();
 
@@ -68,9 +69,11 @@ async fn main() -> anyhow::Result<()> {
 
     let party_count = parties.len();
 
-    // println!("Party {id}: {parties:?}");
+    println!("Party {id}: {parties:?}");
 
-    let tcp_tree = TcpTree::new(id, parties).await?;
+    let tcp_tree = TcpPairWise::new(id, parties).await?;
+
+    println!("Party {id}: Start");
 
     let mut result = [0.0; 2];
 
@@ -85,13 +88,15 @@ async fn main() -> anyhow::Result<()> {
                 rng.fill_bytes(part);
             });
 
-        tcp_tree.share(&mut data, chunk_size).await?;
+        let data_static: &'static mut [u8] = unsafe { transmute(data.as_mut_slice()) };
+        tcp_tree.share(data_static, chunk_size).await?;
 
         let start_time = quanta::Instant::now();
 
         for _j in 0..ITER_COUNT {
-            tcp_tree.share(&mut data, chunk_size).await?;
-            // println!("Party {id}: Iter {i} finished.");
+            let data_static: &'static mut [u8] = unsafe { transmute(data.as_mut_slice()) };
+            tcp_tree.share(data_static, chunk_size).await?;
+            println!("Party {id}: Iter {i} finished.");
         }
 
         let duration = start_time.elapsed();

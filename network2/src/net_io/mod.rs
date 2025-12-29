@@ -1,4 +1,4 @@
-mod quic;
+// mod quic;
 mod tcp;
 
 #[derive(Debug, Clone, Copy)]
@@ -16,5 +16,16 @@ pub trait TreeNetIO {
     ) -> impl std::future::Future<Output = anyhow::Result<()>>;
 }
 
-pub use quic::QuicNetIO;
+pub trait PairWiseNetIO {
+    fn send(self: Arc<Self>, data: &[u8]) -> impl std::future::Future<Output = anyhow::Result<()>>;
+
+    fn recv(
+        self: Arc<Self>,
+        data: &mut [u8],
+    ) -> impl std::future::Future<Output = anyhow::Result<()>>;
+}
+
+use std::sync::Arc;
+
+// pub use quic::QuicNetIO;
 pub use tcp::TcpNetIO;
