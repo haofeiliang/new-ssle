@@ -37,7 +37,7 @@ async fn main() -> anyhow::Result<()> {
     let suffix = if let Some(suffix) = args.suffix {
         suffix
     } else {
-        String::from("none")
+        String::from("tree")
     };
 
     let base_port = args.base_port.unwrap_or(12367);
@@ -98,7 +98,7 @@ async fn main() -> anyhow::Result<()> {
 
         let avg_time = duration / ITER_COUNT;
 
-        println!("Party {id}: Round {i} Average Time: {avg_time:?}");
+        // println!("Party {id}: Round {i} Average Time: {avg_time:?}");
         result[i] = avg_time.as_micros() as f64 / 1000.0;
     }
 

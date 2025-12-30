@@ -38,7 +38,7 @@ async fn main() -> anyhow::Result<()> {
     let suffix = if let Some(suffix) = args.suffix {
         suffix
     } else {
-        String::from("none")
+        String::from("pairwise")
     };
 
     let base_port = args.base_port.unwrap_or(22367);
@@ -69,11 +69,11 @@ async fn main() -> anyhow::Result<()> {
 
     let party_count = parties.len();
 
-    println!("Party {id}: {parties:?}");
+    // println!("Party {id}: {parties:?}");
 
     let tcp_tree = TcpPairWise::new(id, parties).await?;
 
-    println!("Party {id}: Start");
+    // println!("Party {id}: Start");
 
     let mut result = [0.0; 2];
 
@@ -96,14 +96,14 @@ async fn main() -> anyhow::Result<()> {
         for _j in 0..ITER_COUNT {
             let data_static: &'static mut [u8] = unsafe { transmute(data.as_mut_slice()) };
             tcp_tree.share(data_static, chunk_size).await?;
-            println!("Party {id}: Iter {i} finished.");
+            // println!("Party {id}: Iter {i} finished.");
         }
 
         let duration = start_time.elapsed();
 
         let avg_time = duration / ITER_COUNT;
 
-        println!("Party {id}: Round {i} Average Time: {avg_time:?}");
+        // println!("Party {id}: Round {i} Average Time: {avg_time:?}");
         result[i] = avg_time.as_micros() as f64 / 1000.0;
     }
 
