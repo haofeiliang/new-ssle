@@ -27,6 +27,8 @@ struct Cli {
     base_port: Option<u16>,
     #[arg(short, long)]
     suffix: Option<String>,
+    #[arg(long)]
+    scheme: Option<String>,
 }
 
 #[tokio::main]
@@ -41,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
         String::from("pairwise")
     };
 
-    let base_port = args.base_port.unwrap_or(22367);
+    let base_port = args.base_port.unwrap_or(12367);
 
     let mut data = Vec::new();
 
@@ -53,25 +55,40 @@ async fn main() -> anyhow::Result<()> {
         let mut line = String::new();
         reader.read_line(&mut line)?;
 
-        let mut iter = line.split_whitespace().map(|s| s.parse::<usize>());
+        if let Some(scheme) = args.scheme
+            && scheme == "qelect"
+        {
+            (parties, [1024 * 1024, 1024 * 1024])
+        } else {
+            let mut iter = line.split_whitespace().map(|s| s.parse::<usize>());
 
-        let a = iter.next().unwrap()?;
-        let b = iter.next().unwrap()?;
+            let a = iter.next().unwrap()?;
+            let b = iter.next().unwrap()?;
 
-        (parties, [a * 1024, b * 1024])
+            (parties, [a * 1024, b * 1024])
+        }
     } else {
         let party_count = args.party_count.unwrap();
-        (
-            Participant::from_default(party_count, base_port),
-            [600 * 1024, 200 * 1024],
-        )
+        if let Some(scheme) = args.scheme
+            && scheme == "qelect"
+        {
+            (
+                Participant::from_default(party_count, base_port),
+                [1024 * 1024, 1024 * 1024],
+            )
+        } else {
+            (
+                Participant::from_default(party_count, base_port),
+                [600 * 1024, 200 * 1024],
+            )
+        }
     };
 
     let party_count = parties.len();
 
     // println!("Party {id}: {parties:?}");
 
-    let tcp_tree = TcpPairWise::new(id, parties).await?;
+    let tcp_pairwise = TcpPairWise::new(id, parties).await?;
 
     // println!("Party {id}: Start");
 
@@ -89,13 +106,13 @@ async fn main() -> anyhow::Result<()> {
             });
 
         let data_static: &'static mut [u8] = unsafe { transmute(data.as_mut_slice()) };
-        tcp_tree.share(data_static, chunk_size).await?;
+        tcp_pairwise.share(data_static, chunk_size).await?;
 
         let start_time = quanta::Instant::now();
 
         for _j in 0..ITER_COUNT {
             let data_static: &'static mut [u8] = unsafe { transmute(data.as_mut_slice()) };
-            tcp_tree.share(data_static, chunk_size).await?;
+            tcp_pairwise.share(data_static, chunk_size).await?;
             // println!("Party {id}: Iter {i} finished.");
         }
 
@@ -107,7 +124,7 @@ async fn main() -> anyhow::Result<()> {
         result[i] = avg_time.as_micros() as f64 / 1000.0;
     }
 
-    tcp_tree.close().await?;
+    tcp_pairwise.close().await?;
 
     let file = File::create(&format!("p{party_count}_id{id}_tcp_{suffix}.csv"))?;
 

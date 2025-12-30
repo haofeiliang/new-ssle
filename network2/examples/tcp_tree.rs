@@ -26,6 +26,8 @@ struct Cli {
     base_port: Option<u16>,
     #[arg(short, long)]
     suffix: Option<String>,
+    #[arg(long)]
+    scheme: Option<String>,
 }
 
 #[tokio::main]
@@ -52,18 +54,33 @@ async fn main() -> anyhow::Result<()> {
         let mut line = String::new();
         reader.read_line(&mut line)?;
 
-        let mut iter = line.split_whitespace().map(|s| s.parse::<usize>());
+        if let Some(scheme) = args.scheme
+            && scheme == "qelect"
+        {
+            (parties, [1024 * 1024, 1024 * 1024])
+        } else {
+            let mut iter = line.split_whitespace().map(|s| s.parse::<usize>());
 
-        let a = iter.next().unwrap()?;
-        let b = iter.next().unwrap()?;
+            let a = iter.next().unwrap()?;
+            let b = iter.next().unwrap()?;
 
-        (parties, [a * 1024, b * 1024])
+            (parties, [a * 1024, b * 1024])
+        }
     } else {
         let party_count = args.party_count.unwrap();
-        (
-            Participant::from_default(party_count, base_port),
-            [600 * 1024, 200 * 1024],
-        )
+        if let Some(scheme) = args.scheme
+            && scheme == "qelect"
+        {
+            (
+                Participant::from_default(party_count, base_port),
+                [1024 * 1024, 1024 * 1024],
+            )
+        } else {
+            (
+                Participant::from_default(party_count, base_port),
+                [600 * 1024, 200 * 1024],
+            )
+        }
     };
 
     let party_count = parties.len();
