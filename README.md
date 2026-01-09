@@ -39,7 +39,7 @@ Note: AVX512 support requires:
 2. CPU with AVX512 support
 3. `--features="nightly"` flag when running
 
-### Run our codes with parties count less than 32
+### Run our codes with parties count $G$ in [2, 4, 8, 16, 32]
 
 ```bash
 cargo run --release --package ssle_core --example ssle_compute_time -- -p 4
@@ -76,7 +76,7 @@ communication size: 2.34375MB
 +-----------------------------+------------+
 ```
 
-### Run our codes with parties count less than 256
+### Run our codes with parties count $G$ in [64, 128]
 
 ```bash
 cargo run --release --package ssle_core --example ssle_compute_time --features="gt32" -- -p 64
@@ -113,7 +113,7 @@ communication size: 73.828125MB
 +-----------------------------+-------------+
 ```
 
-### Run our codes with parties count more than or equal to 256
+### Run our codes with parties count $G$ in [256, 512, 1024, 2048]
 
 ```bash
 cargo run --release --package ssle_core --example ssle_ge_256_compute_time_improve --features="gt128" -- -p 256
