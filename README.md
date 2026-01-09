@@ -29,6 +29,12 @@ For more information, see the [Rust installation guide](https://www.rust-lang.or
 
 ## Run examples
 
+### Examples:
+- `ssle_core/exmaples/check_commit.rs`: Check the correctness of the commit encryption and decryption.
+- `ssle_core/exmaples/ssle.rs`: Simulate multi parties on local computer (You needs $G$ cores on your computer for testing $G$ parties.).
+- `ssle_core/exmaples/ssle_compute_time.rs`: Test the compute time (Test single party, the data of other parties is generated in advance).
+- `ssle_core/exmaples/ssle_ge_256_compute_time_improve.rs`: Test the improved compute time with the $G>128$ (Test single party, the data of other parties is generated in advance).
+
 ### Parameters:
 - `party-count` or `p`: G, the number of parties
 

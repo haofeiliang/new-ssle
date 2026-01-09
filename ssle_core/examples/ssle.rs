@@ -1,8 +1,8 @@
-// cargo run --release --package ssle_core --example new_ssle_v3 -- -p 4
-// cargo run --release --package ssle_core --example new_ssle_v3 --features="gt128" -- -p 256
-// cargo +nightly run --release --package ssle_core --example new_ssle_v3 --features="nightly" -- -p 4
-// cargo +nightly run --release --package ssle_core --example new_ssle_v3 --features="nightly gt32" -- -p 64
-// cargo +nightly run --release --package ssle_core --example new_ssle_v3 --features="nightly gt128" -- -p 256
+// cargo run --release --package ssle_core --example ssle -- -p 4
+// cargo run --release --package ssle_core --example ssle --features="gt128" -- -p 256
+// cargo +nightly run --release --package ssle_core --example ssle --features="nightly" -- -p 4
+// cargo +nightly run --release --package ssle_core --example ssle --features="nightly gt32" -- -p 64
+// cargo +nightly run --release --package ssle_core --example ssle --features="nightly gt128" -- -p 256
 
 use std::sync::Arc;
 
