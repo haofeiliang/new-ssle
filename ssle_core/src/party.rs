@@ -201,6 +201,33 @@ impl Party {
             .unwrap();
     }
 
+    pub fn share_to_p0<T: UnsignedInteger>(&self, data: &[T], destination: Option<&mut [T]>) {
+        let chunk_size = data.len();
+
+        self.rt
+            .block_on(async {
+                match destination {
+                    Some(des) => {
+                        for (i, chunk) in des.chunks_exact_mut(chunk_size).enumerate() {
+                            if i as Id == self.party_id() {
+                                chunk.copy_from_slice(data);
+                            } else {
+                                self.netio
+                                    .recv(i as Id, bytemuck::cast_slice_mut(chunk))
+                                    .await?;
+                            }
+                        }
+                    }
+                    None => {
+                        self.netio.send(0, bytemuck::cast_slice(data)).await?;
+                    }
+                }
+
+                Ok::<_, NetIoError>(())
+            })
+            .unwrap();
+    }
+
     pub fn share_v3<I: AsRef<[T]> + AsMut<[T]>, T: UnsignedInteger>(
         &self,
         data: &I,

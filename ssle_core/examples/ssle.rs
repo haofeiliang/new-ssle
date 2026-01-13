@@ -10,10 +10,11 @@ use clap::Parser;
 use itertools::izip;
 use mimalloc::MiMalloc;
 use network::{Id, netio::Participant};
+use num::Integer;
 use primus_fhe_core::{
     CrtGlweTraceContext, DcrtGlweCiphertext, DcrtGlweDecryptContext, NttRlwePublicKey,
 };
-use primus_integer::AsInto;
+use primus_integer::{AsInto, BigUint, DataMut};
 use primus_lattice::{
     context::DcrtGlevContext,
     ggsw::DcrtGgsw,
@@ -26,7 +27,8 @@ use primus_reduce::Modulus;
 use rand::Rng;
 use ssle_core::{
     CoefficientExpansionKey, CommitModulus, CommitTable, CommitValueT, CrtValueT, KeyGen,
-    MasterPublicKey, MasterSecretKey, Party, SsleParameters,
+    MasterPublicKey, MasterSecretKey, MasterSecretKeyShare, Party, SsleParameters,
+    generate_dd_random,
 };
 
 #[cfg(feature = "gt32")]
@@ -128,15 +130,25 @@ fn main() {
 
     let (msk, mpk, eck) = KeyGen::generate_keys(&params, rng);
 
+    let msk_shares = msk.genearte_shares(party_count, rng);
+
+    let dd_randoms = generate_dd_random(
+        party_count,
+        params.ring_params().poly_length() * 2,
+        &params,
+        rng,
+    );
+
     println!("Key Generation done!");
 
     let (tx, recv_commits) = std::sync::mpsc::channel();
     let mut final_commit_senders = Vec::with_capacity(party_count);
 
     let threads = (0..party_count as Id)
-        .map(|party_id| {
+        .zip(dd_randoms)
+        .zip(msk_shares)
+        .map(|((party_id, dd_random), msk_share)| {
             let participants_c = participants.clone();
-            let msk_c = msk.clone();
             let mpk_c = mpk.clone();
             let eck_c = eck.clone();
             let send_commit_sum = if party_id == 0 {
@@ -157,10 +169,11 @@ fn main() {
                     party_operation(
                         party_id,
                         participants_c,
-                        msk_c,
+                        msk_share,
                         mpk_c,
                         eck_c,
                         thread_count,
+                        dd_random,
                         send_commit_sum,
                         recv_final_commit,
                     )
@@ -228,10 +241,11 @@ fn sim_thfhe_decrypt(
 fn party_operation(
     party_id: Id,
     participants: Vec<Participant>,
-    _msk: MasterSecretKey,
+    msk_share: MasterSecretKeyShare,
     mpk: MasterPublicKey,
     eck: CoefficientExpansionKey,
     thread_count: usize,
+    (r_mod_delta_prime_share, r_mod_q_prime_share): (Vec<CrtValueT>, Vec<CrtValueT>),
     send_commit_sum: Option<std::sync::mpsc::Sender<Vec<CrtValueT>>>,
     recv_final_commit: crossbeam_channel::Receiver<Vec<CommitValueT>>,
 ) -> usize {
@@ -448,12 +462,162 @@ fn party_operation(
                 });
         });
 
+    let mut dec_share: Vec<CrtValueT> = vec![0; rns_poly_len * 2];
+
+    for (x, y) in final_encode_commits
+        .chunks_exact(rns_glwe_len)
+        .zip(dec_share.chunks_exact_mut(rns_poly_len))
+    {
+        if party_id == 0 {
+            msk_share.phase_inplace(&DcrtGlwe(x), &mut DcrtPolynomial(&mut *y));
+        } else {
+            msk_share.phase_a_inplace(&DcrtGlwe(x), &mut DcrtPolynomial(&mut *y));
+        }
+
+        table.inverse_transform_slice(y);
+    }
+
+    let mut big_uint_dec_share: Vec<CrtValueT> = vec![0; big_uint_poly_len * 2];
+    let mut all_big_uint_dec_share: Vec<CrtValueT> = vec![0; big_uint_poly_len * 2 * party_count];
+    let rns_base = ring_params.base_q();
+    let big_uint_value_len = ring_params.big_uint_value_len();
+
+    for (x, y) in dec_share
+        .chunks_exact(rns_poly_len)
+        .zip(big_uint_dec_share.chunks_exact_mut(big_uint_poly_len))
+    {
+        rns_base.compose_multiple_values_inplace(x, y, ring_poly_length);
+    }
+
+    let p = num::BigUint::from(ring_params.plain_modulus_value());
+
+    let q = rns_base.moduli_product();
+    let q_big = num::BigUint::from_slice(bytemuck::cast_slice(q.digits()));
+
+    let q_prime_big = q_big.next_multiple_of(&p);
+    let q_prime: primus_integer::BigUint<Vec<CrtValueT>> =
+        primus_integer::BigUint(q_prime_big.iter_u64_digits().collect());
+
+    let delta_prime_big = &q_prime_big / p;
+    let delta_prime: primus_integer::BigUint<Vec<CrtValueT>> =
+        primus_integer::BigUint(delta_prime_big.iter_u64_digits().collect());
+
+    let mut e_shares: Vec<CrtValueT> = vec![0; big_uint_poly_len * 2];
+    let mut all_e_shares: Vec<CrtValueT> = vec![0; big_uint_poly_len * 2 * party_count];
+
+    for (value, e, r) in izip!(
+        big_uint_dec_share.chunks_exact_mut(big_uint_value_len),
+        e_shares.chunks_exact_mut(big_uint_value_len),
+        r_mod_delta_prime_share.chunks_exact(big_uint_value_len),
+    ) {
+        let mut temp = num::BigUint::from_slice(bytemuck::cast_slice(value));
+
+        temp *= &q_prime_big;
+
+        let (mut temp, rem) = temp.div_rem(&q_big);
+        if rem * 2u8 >= q_big {
+            temp += 1u8;
+        }
+
+        value.fill(0);
+
+        value
+            .iter_mut()
+            .zip(temp.iter_u64_digits())
+            .for_each(|(x, y)| *x = y);
+
+        temp %= &delta_prime_big;
+
+        e.iter_mut()
+            .zip(temp.iter_u64_digits())
+            .for_each(|(x, y)| *x = y);
+
+        primus_integer::BigUint(e).add_modulo_assign(&primus_integer::BigUint(r), &delta_prime);
+    }
+
+    if party_id == 0 {
+        party.share_to_p0(&e_shares, Some(&mut all_e_shares));
+    } else {
+        party.share_to_p0(&e_shares, None);
+    }
+
+    if party_id == 0 {
+        e_shares.fill(0);
+        all_e_shares
+            .chunks_exact(big_uint_poly_len * 2)
+            .for_each(|x| {
+                for (a, b) in e_shares
+                    .chunks_exact_mut(big_uint_value_len)
+                    .zip(x.chunks_exact(big_uint_value_len))
+                {
+                    BigUint(a).add_modulo_assign(&BigUint(b), &delta_prime);
+                }
+            });
+        let mut delta_prime_half = delta_prime.clone();
+        delta_prime_half.right_shift_assign(1);
+        e_shares.chunks_exact_mut(big_uint_value_len).for_each(|v| {
+            let mut value = BigUint(v);
+
+            if value.cmp(&delta_prime_half).is_ge() {
+                value.neg_modulo_assign(&delta_prime);
+            }
+        });
+    }
+
+    if party_id == 0 {
+        for (a, b, c) in izip!(
+            big_uint_dec_share.chunks_exact_mut(big_uint_value_len),
+            e_shares.chunks_exact(big_uint_value_len),
+            r_mod_q_prime_share.chunks_exact(big_uint_value_len),
+        ) {
+            BigUint(&mut *a).sub_modulo_assign(&BigUint(b), &q_prime);
+            BigUint(a).add_modulo_assign(&BigUint(c), &q_prime);
+        }
+    } else {
+        for (a, b) in izip!(
+            big_uint_dec_share.chunks_exact_mut(big_uint_value_len),
+            r_mod_q_prime_share.chunks_exact(big_uint_value_len),
+        ) {
+            BigUint(a).add_modulo_assign(&BigUint(b), &q_prime);
+        }
+    }
+
+    party.share_v2(&big_uint_dec_share, &mut all_big_uint_dec_share);
+
+    big_uint_dec_share.fill(0);
+    all_big_uint_dec_share
+        .chunks_exact(big_uint_poly_len * 2)
+        .for_each(|x| {
+            for (a, b) in big_uint_dec_share
+                .chunks_exact_mut(big_uint_value_len)
+                .zip(x.chunks_exact(big_uint_value_len))
+            {
+                BigUint(a).add_modulo_assign(&BigUint(b), &q_prime);
+            }
+        });
+
+    let mut dd_final_commit: Vec<CommitValueT> = vec![0; ring_poly_length * 2];
+
+    for (a, b) in dd_final_commit
+        .iter_mut()
+        .zip(big_uint_dec_share.chunks_exact(big_uint_value_len))
+    {
+        let b = num::BigUint::from_slice(bytemuck::cast_slice(b));
+        let (mut b, rem) = b.div_rem(&delta_prime_big);
+        if rem * 2u8 >= delta_prime_big {
+            b += 1u8;
+        }
+        *a = b.iter_u32_digits().next().unwrap_or(0);
+    }
+
     if let Some(send_commit_sum) = send_commit_sum {
         send_commit_sum.send(final_encode_commits).unwrap();
         drop(send_commit_sum);
     }
 
-    if let Ok(mut final_commit) = recv_final_commit.recv() {
+    if let Ok(mut _final_commit) = recv_final_commit.recv() {
+        let mut final_commit = dd_final_commit;
+
         final_commit
             .chunks_exact_mut(ring_poly_length)
             .for_each(|poly| div_v(poly));

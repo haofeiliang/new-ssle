@@ -12,6 +12,6 @@ pub use parameters::{
 
 pub use keygen::{CoefficientExpansionKey, KeyGen};
 pub use master_public_key::MasterPublicKey;
-pub use master_secret_key::MasterSecretKey;
+pub use master_secret_key::{MasterSecretKey, MasterSecretKeyShare, generate_dd_random};
 
 pub use party::Party;
