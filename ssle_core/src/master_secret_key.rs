@@ -53,7 +53,7 @@ impl MasterSecretKey {
         &self.table
     }
 
-    pub fn genearte_shares<R>(&self, party_count: usize, rng: &mut R) -> Vec<MasterSecretKeyShare>
+    pub fn generate_shares<R>(&self, party_count: usize, rng: &mut R) -> Vec<MasterSecretKeyShare>
     where
         R: rand::Rng + rand::CryptoRng,
     {

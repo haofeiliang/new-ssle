@@ -130,7 +130,7 @@ fn main() {
 
     let (msk, mpk, eck) = KeyGen::generate_keys(&params, rng);
 
-    let msk_shares = msk.genearte_shares(party_count, rng);
+    let msk_shares = msk.generate_shares(party_count, rng);
 
     let dd_randoms = generate_dd_random(
         party_count,

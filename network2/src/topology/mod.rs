@@ -5,15 +5,16 @@ use std::{
     path::Path,
 };
 
-// mod quic;
 mod tcp;
 
+mod tcp_collect;
 mod tcp_pair_wise;
 
 use crate::Id;
 
 // pub use quic::QuicTree;
 pub use tcp::TcpTree;
+pub use tcp_collect::TcpCollect;
 pub use tcp_pair_wise::TcpPairWise;
 
 /// Represents a participant in the network.

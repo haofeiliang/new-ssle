@@ -58,14 +58,14 @@ async fn main() -> anyhow::Result<()> {
         if let Some(scheme) = args.scheme
             && scheme == "qelect"
         {
-            (parties, [1024 * 1024, 1024 * 1024])
+            (parties, vec![1024 * 1024, 1024 * 1024])
         } else {
-            let mut iter = line.split_whitespace().map(|s| s.parse::<usize>());
+            let chunk_sizes: Vec<usize> = line
+                .split_whitespace()
+                .filter_map(|s| s.parse::<usize>().ok())
+                .collect();
 
-            let a = iter.next().unwrap()?;
-            let b = iter.next().unwrap()?;
-
-            (parties, [a * 1024, b * 1024])
+            (parties, chunk_sizes)
         }
     } else {
         let party_count = args.party_count.unwrap();
@@ -74,17 +74,19 @@ async fn main() -> anyhow::Result<()> {
         {
             (
                 Participant::from_default(party_count, base_port),
-                [1024 * 1024, 1024 * 1024],
+                vec![1024 * 1024, 1024 * 1024],
             )
         } else {
             (
                 Participant::from_default(party_count, base_port),
-                [600 * 1024, 200 * 1024],
+                vec![600 * 1024, 200 * 1024],
             )
         }
     };
 
     let party_count = parties.len();
+
+    let chunk_count = chunk_sizes.len();
 
     // println!("Party {id}: {parties:?}");
 
@@ -92,9 +94,9 @@ async fn main() -> anyhow::Result<()> {
 
     // println!("Party {id}: Start");
 
-    let mut result = [0.0; 2];
+    let mut result = Vec::with_capacity(chunk_count);
 
-    for (i, chunk_size) in chunk_sizes.into_iter().enumerate() {
+    for &chunk_size in chunk_sizes.iter() {
         data.resize(chunk_size * party_count, 0);
 
         data.chunks_exact_mut(chunk_size)
@@ -121,7 +123,7 @@ async fn main() -> anyhow::Result<()> {
         let avg_time = duration / ITER_COUNT;
 
         // println!("Party {id}: Round {i} Average Time: {avg_time:?}");
-        result[i] = avg_time.as_micros() as f64 / 1000.0;
+        result.push(avg_time.as_micros() as f64 / 1000.0);
     }
 
     tcp_pairwise.close().await?;
@@ -140,7 +142,7 @@ async fn main() -> anyhow::Result<()> {
         "PartyID",
         "NumParties",
     ])?;
-    for i in 0..2 {
+    for i in 0..chunk_count {
         wtr.serialize((
             i,
             chunk_sizes[i] >> 10,
