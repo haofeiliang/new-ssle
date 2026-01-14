@@ -136,21 +136,13 @@ async fn main() -> anyhow::Result<()> {
 
         wtr.write_record([
             "Round",
-            "DataSize_KB",
             "DataSize_Bytes",
             "Time_ms",
             "PartyID",
             "NumParties",
         ])?;
         for i in 0..chunk_count {
-            wtr.serialize((
-                i,
-                chunk_sizes[i] >> 10,
-                chunk_sizes[i],
-                result[i],
-                id,
-                party_count,
-            ))?;
+            wtr.serialize((i, chunk_sizes[i], result[i], id, party_count))?;
         }
 
         wtr.flush()?;
