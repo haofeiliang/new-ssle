@@ -59,10 +59,12 @@ async fn main() -> anyhow::Result<()> {
         {
             (parties, vec![1024 * 1024, 1024 * 1024])
         } else {
-            let chunk_sizes: Vec<usize> = line
+            let mut chunk_sizes: Vec<usize> = line
                 .split_whitespace()
                 .filter_map(|s| s.parse::<usize>().ok())
                 .collect();
+
+            chunk_sizes.iter_mut().for_each(|v| *v *= 1024);
 
             (parties, chunk_sizes)
         }
