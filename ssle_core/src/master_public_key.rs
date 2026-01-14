@@ -58,7 +58,7 @@ impl MasterPublicKey {
 
     pub fn generate_rotate_rgsw_inplace<R, A>(
         &self,
-        degree: usize,
+        mut degree: usize,
         result: &mut DcrtGgsw<A>,
         rng: &mut R,
     ) where
@@ -68,7 +68,16 @@ impl MasterPublicKey {
         let ggsw_params = self.ggsw_params();
         let moduli_count = ggsw_params.cipher_moduli_count();
 
-        let coeff_residues: Vec<CrtValueT> = vec![1; moduli_count];
+        let poly_length = ggsw_params.poly_length();
+
+        assert!(degree < poly_length * 2);
+
+        let coeff_residues: Vec<CrtValueT> = if degree < poly_length {
+            vec![1; moduli_count]
+        } else {
+            degree -= poly_length;
+            ggsw_params.cipher_moduli_minus_one().to_vec()
+        };
 
         self.pk.encrypt_monomial_ggsw_inplace(
             &coeff_residues,

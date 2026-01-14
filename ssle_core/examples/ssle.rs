@@ -11,9 +11,7 @@ use itertools::izip;
 use mimalloc::MiMalloc;
 use network::{Id, netio::Participant};
 use num::Integer;
-use primus_fhe_core::{
-    CrtGlweTraceContext, DcrtGlweCiphertext, DcrtGlweDecryptContext, NttRlwePublicKey,
-};
+use primus_fhe_core::{CrtGlweTraceContext, NttRlwePublicKey};
 use primus_integer::{AsInto, BigUint, DataMut};
 use primus_lattice::{
     context::DcrtGlevContext,
@@ -27,9 +25,10 @@ use primus_reduce::Modulus;
 use rand::Rng;
 use ssle_core::{
     CoefficientExpansionKey, CommitModulus, CommitTable, CommitValueT, CrtValueT, KeyGen,
-    MasterPublicKey, MasterSecretKey, MasterSecretKeyShare, Party, SsleParameters,
-    generate_dd_random,
+    MasterPublicKey, MasterSecretKeyShare, Party, SsleParameters, generate_dd_random,
 };
+use tracing::{Level, debug, error, info, warn};
+use tracing_subscriber::fmt::format::FmtSpan;
 
 #[cfg(feature = "gt32")]
 const GT32: bool = true;
@@ -67,9 +66,11 @@ fn check_args(args: Args) -> (usize, usize, SsleParameters) {
     let party_count = match party_count {
         Some(p) => {
             if !p.is_power_of_two() {
-                panic!("Party count {p} is no power of two!")
+                error!("Party count {p} is not power of two!");
+                panic!("Party count {p} is not power of two!")
             }
             if p * thread_count > max_cpu_cores {
+                error!("Your CPU has not enough cores!");
                 panic!("Your CPU has not enough cores!")
             }
             p
@@ -81,6 +82,7 @@ fn check_args(args: Args) -> (usize, usize, SsleParameters) {
         if !GT32 && !GT128 {
             SsleParameters::new(party_count)
         } else {
+            error!("Don't enable feature `gt32` and `gt128` for party count: {party_count}<=32!");
             panic!("Don't enable feature `gt32` and `gt128` for party count: {party_count}<=32!")
         }
     } else if party_count <= 128 {
@@ -88,8 +90,10 @@ fn check_args(args: Args) -> (usize, usize, SsleParameters) {
             SsleParameters::new(party_count)
         } else {
             if !GT32 {
+                error!("Enable feature `gt32` for party count: {party_count}!");
                 panic!("Enable feature `gt32` for party count: {party_count}!")
             } else {
+                error!("Don't enable feature `gt128` for party count: {party_count}<=128!");
                 panic!("Don't enable feature `gt128` for party count: {party_count}<=128!")
             }
         }
@@ -98,19 +102,22 @@ fn check_args(args: Args) -> (usize, usize, SsleParameters) {
             SsleParameters::new(party_count)
         } else {
             if GT32 {
+                error!("Don't enable feature `gt32` for party count: {party_count}>128!");
                 panic!("Don't enable feature `gt32` for party count: {party_count}>128!")
             } else {
+                error!("Enable feature `gt128` for party count: {party_count}!");
                 panic!("Enable feature `gt128` for party count: {party_count}!")
             }
         }
     } else {
+        error!("no preparation for party count lager than 2048!");
         panic!("no preparation for party count lager than 2048!")
     };
 
-    println!("Party count: {party_count}");
-    println!("Thread count per party: {thread_count}");
+    info!("Party count: {party_count}");
+    info!("Thread count per party: {thread_count}");
     if thread_count > 1 {
-        println!(
+        warn!(
             "The current code implementation is not optimized for multithreading, so only one thread will be used per party."
         )
     }
@@ -119,6 +126,12 @@ fn check_args(args: Args) -> (usize, usize, SsleParameters) {
 }
 
 fn main() {
+    tracing_subscriber::fmt()
+        .compact()
+        .with_span_events(FmtSpan::CLOSE)
+        .with_thread_ids(true)
+        .with_max_level(Level::DEBUG)
+        .init();
     let args = Args::parse();
 
     let (party_count, thread_count, params) = check_args(args);
@@ -139,10 +152,7 @@ fn main() {
         rng,
     );
 
-    println!("Key Generation done!");
-
-    let (tx, recv_commits) = std::sync::mpsc::channel();
-    let mut final_commit_senders = Vec::with_capacity(party_count);
+    info!("Key Generation done!");
 
     let threads = (0..party_count as Id)
         .zip(dd_randoms)
@@ -151,13 +161,6 @@ fn main() {
             let participants_c = participants.clone();
             let mpk_c = mpk.clone();
             let eck_c = eck.clone();
-            let send_commit_sum = if party_id == 0 {
-                Some(tx.clone())
-            } else {
-                None
-            };
-            let (send_final_commit, recv_final_commit) = crossbeam_channel::bounded(1);
-            final_commit_senders.push(send_final_commit);
 
             std::thread::spawn(move || {
                 let threads_pool = rayon::ThreadPoolBuilder::new()
@@ -174,68 +177,13 @@ fn main() {
                         eck_c,
                         thread_count,
                         dd_random,
-                        send_commit_sum,
-                        recv_final_commit,
                     )
                 })
             })
         })
         .collect::<Vec<_>>();
 
-    drop(tx);
-
-    sim_thfhe_decrypt(
-        party_count,
-        &msk,
-        &params,
-        recv_commits,
-        final_commit_senders,
-    );
-
-    check_result(&params, party_count, threads);
-}
-
-fn sim_thfhe_decrypt(
-    _party_count: usize,
-    msk: &MasterSecretKey,
-    params: &SsleParameters,
-    recv_commits: std::sync::mpsc::Receiver<Vec<CrtValueT>>,
-    final_commit_senders: Vec<crossbeam_channel::Sender<Vec<CommitValueT>>>,
-) {
-    let ring_params = params.ring_params();
-    let ring_poly_length = ring_params.poly_length();
-
-    if let Ok(encoded_commits) = recv_commits.recv() {
-        let mid = encoded_commits.len() / 2;
-
-        assert_eq!(mid, ring_params.rns_glwe_len());
-
-        let mut commit_data: Vec<CrtValueT> = vec![0; ring_poly_length * 2];
-        let mut context =
-            DcrtGlweDecryptContext::new(ring_params.cipher_moduli_count(), ring_poly_length);
-
-        for (poly, encoded_commit) in commit_data
-            .chunks_mut(ring_poly_length)
-            .zip(encoded_commits.chunks_exact(mid))
-        {
-            msk.decrypt_inplace(
-                &DcrtGlweCiphertext::new(encoded_commit),
-                &mut Polynomial(poly),
-                params.ring_params(),
-                msk.table(),
-                &mut context,
-            );
-        }
-
-        let final_commit: Vec<CommitValueT> = commit_data
-            .into_iter()
-            .map(|v| v.try_into().unwrap())
-            .collect();
-
-        for tx in final_commit_senders {
-            tx.send(final_commit.clone()).unwrap();
-        }
-    }
+    check_result(party_count, threads);
 }
 
 fn party_operation(
@@ -246,8 +194,6 @@ fn party_operation(
     eck: CoefficientExpansionKey,
     thread_count: usize,
     (r_mod_delta_prime_share, r_mod_q_prime_share): (Vec<CrtValueT>, Vec<CrtValueT>),
-    send_commit_sum: Option<std::sync::mpsc::Sender<Vec<CrtValueT>>>,
-    recv_final_commit: crossbeam_channel::Receiver<Vec<CommitValueT>>,
 ) -> usize {
     let rng = &mut rand::rng();
 
@@ -328,36 +274,43 @@ fn party_operation(
         vec![Rlwe::zero(commit_rlwe_len); party_count];
 
     if party_id == 0 {
-        println!("Party {party_id}: Start share commit.");
+        debug!("Party {party_id}: Start share commit.");
     }
 
     party.share_v3(&commit, all_commit.as_mut_slice());
 
     if party_id == 0 {
-        println!("Party {party_id}: Start share pk.");
+        debug!("Party {party_id}: Start share pk.");
     }
 
     party.share_v3(&commit_pk, all_commit_pk.as_mut_slice());
 
     if party_id == 0 {
-        println!("Party {party_id}: Commit and commit pk shared.");
+        debug!("Party {party_id}: Commit and commit pk shared.");
     }
 
     let mut rotate_ggsw: DcrtGgsw<Vec<CrtValueT>> = DcrtGgsw::zero(rns_ggsw_len);
     let mut all_rotate_ggsw: Vec<DcrtGgsw<Vec<CrtValueT>>> =
         vec![DcrtGgsw::zero(rns_ggsw_len); party_count];
 
-    // Check random degree for rgsw
-    let degree = rng.random_range(0..ring_poly_length);
+    let degree = rng.random_range(0..ring_poly_length * 2);
 
     // Generate ACC
     let mut acc: CrtGlwe<Vec<CrtValueT>> = party.generate_init_acc();
+
+    if party_id == 0 {
+        debug!("Party {party_id}: Start generate RGSW.");
+    }
 
     party.generate_rotate_rgsw_inplace(degree, &mut rotate_ggsw, rng);
 
     party.share_v3(&rotate_ggsw, all_rotate_ggsw.as_mut_slice());
 
     let mut temp_dcrt_glwe: DcrtGlwe<Vec<CrtValueT>> = DcrtGlwe::zero(rns_glwe_len);
+
+    if party_id == 0 {
+        debug!("Party {party_id}: Start aggregate all randomness.");
+    }
 
     for rotate_rgsw in all_rotate_ggsw.iter() {
         acc.mul_dcrt_ggsw_inplace(
@@ -375,6 +328,10 @@ fn party_operation(
     let mut expand_result = vec![<CrtGlwe<Vec<CrtValueT>>>::zero(rns_glwe_len); party_count];
     let mut selectors = vec![<DcrtGlwe<Vec<CrtValueT>>>::zero(rns_glwe_len); party_count];
 
+    if party_id == 0 {
+        debug!("Party {party_id}: Start generate Selectors.");
+    }
+
     eck.expand_partial_coefficients_inplace(
         &acc,
         &mut expand_result,
@@ -389,6 +346,10 @@ fn party_operation(
         .for_each(|(x, y)| {
             x.to_ntt_form_inplace(y, table);
         });
+
+    if party_id == 0 {
+        debug!("Party {party_id}: Start re-randomize commit.");
+    }
 
     for (commit, commit_pk, rr_commit) in izip!(
         all_commit.iter(),
@@ -413,6 +374,10 @@ fn party_operation(
     let mut encode_commits: Vec<CrtValueT> = vec![0; rns_glwe_len * 2];
     let mut final_encode_commits: Vec<CrtValueT> = vec![0; rns_glwe_len * 2];
     let mut all_encode_commits: Vec<CrtValueT> = vec![0; rns_glwe_len * 2 * party_count];
+
+    if party_id == 0 {
+        debug!("Party {party_id}: Start encode randomized commits.");
+    }
 
     selectors
         .iter()
@@ -461,6 +426,10 @@ fn party_operation(
                     );
                 });
         });
+
+    if party_id == 0 {
+        debug!("Party {party_id}: Start distributed decryption.");
+    }
 
     let mut dec_share: Vec<CrtValueT> = vec![0; rns_poly_len * 2];
 
@@ -596,9 +565,9 @@ fn party_operation(
             }
         });
 
-    let mut dd_final_commit: Vec<CommitValueT> = vec![0; ring_poly_length * 2];
+    let mut final_commit: Vec<CommitValueT> = vec![0; ring_poly_length * 2];
 
-    for (a, b) in dd_final_commit
+    for (a, b) in final_commit
         .iter_mut()
         .zip(big_uint_dec_share.chunks_exact(big_uint_value_len))
     {
@@ -610,105 +579,68 @@ fn party_operation(
         *a = b.iter_u32_digits().next().unwrap_or(0);
     }
 
-    if let Some(send_commit_sum) = send_commit_sum {
-        send_commit_sum.send(final_encode_commits).unwrap();
-        drop(send_commit_sum);
+    if party_id == 0 {
+        debug!("Party {party_id}: Start verifying.");
     }
 
-    if let Ok(mut _final_commit) = recv_final_commit.recv() {
-        let mut final_commit = dd_final_commit;
+    final_commit
+        .chunks_exact_mut(ring_poly_length)
+        .for_each(|poly| div_v(poly));
 
-        final_commit
-            .chunks_exact_mut(ring_poly_length)
-            .for_each(|poly| div_v(poly));
+    let mut decoded_commit: Vec<CommitValueT> = vec![0; commit_poly_length * 2];
 
-        let mut decoded_commit: Vec<CommitValueT> = vec![0; commit_poly_length * 2];
+    {
+        let (a_in, b_in) = final_commit.split_at_mut(ring_poly_length);
+        let (a_out, b_out) = decoded_commit.split_at_mut(commit_poly_length);
 
+        let mut a_arr = ArrayBase(a_out);
+        let mut b_arr = ArrayBase(b_out);
+
+        let mut last = None;
+        'o: for (i, (a_chunk, b_chunk)) in a_in
+            .chunks_exact(commit_poly_length)
+            .zip(b_in.chunks_exact(commit_poly_length))
+            .enumerate()
         {
-            let (a_in, b_in) = final_commit.split_at_mut(ring_poly_length);
-            let (a_out, b_out) = decoded_commit.split_at_mut(commit_poly_length);
-
-            let mut a_arr = ArrayBase(a_out);
-            let mut b_arr = ArrayBase(b_out);
-
-            let mut last = None;
-            'o: for (i, (a_chunk, b_chunk)) in a_in
-                .chunks_exact(commit_poly_length)
-                .zip(b_in.chunks_exact(commit_poly_length))
-                .enumerate()
-            {
-                if !ArrayBase(a_chunk).is_zero() || !ArrayBase(b_chunk).is_zero() {
-                    if let Some(last) = last {
-                        if last + 1 != i {
-                            a_arr.add_element_wise_assign(&ArrayBase(a_chunk), CommitModulus);
-                            b_arr.add_element_wise_assign(&ArrayBase(b_chunk), CommitModulus);
-                        } else {
-                            a_arr.sub_element_wise_assign(&ArrayBase(a_chunk), CommitModulus);
-                            b_arr.sub_element_wise_assign(&ArrayBase(b_chunk), CommitModulus);
-                        }
-                        break 'o;
+            if !ArrayBase(a_chunk).is_zero() || !ArrayBase(b_chunk).is_zero() {
+                if let Some(last) = last {
+                    if last + 1 != i {
+                        a_arr.add_element_wise_assign(&ArrayBase(a_chunk), CommitModulus);
+                        b_arr.add_element_wise_assign(&ArrayBase(b_chunk), CommitModulus);
                     } else {
-                        a_arr.copy_from_slice(a_chunk);
-                        b_arr.copy_from_slice(b_chunk);
-                        last = Some(i);
+                        a_arr.sub_element_wise_assign(&ArrayBase(a_chunk), CommitModulus);
+                        b_arr.sub_element_wise_assign(&ArrayBase(b_chunk), CommitModulus);
                     }
+                    break 'o;
+                } else {
+                    a_arr.copy_from_slice(a_chunk);
+                    b_arr.copy_from_slice(b_chunk);
+                    last = Some(i);
                 }
             }
         }
-
-        let cipher = Rlwe(decoded_commit);
-        let cipher = cipher.into_ntt_form(&commit_ntt_table);
-
-        let msgs = commit_sk.decrypt(&cipher, commit_params, &commit_ntt_table);
-
-        let is_leader = msgs.iter().all(|&v| v == 0);
-
-        if is_leader {
-            println!("\nParty {party_id}: I'm leader!",);
-        }
     }
 
-    if party_id == 0 {
-        // println!("commit bytes count: {}", commit.bytes_count());
-        // println!("commit pk bytes count: {}", commit_pk.bytes_count());
-        // println!("ggsw bytes count: {}", rotate_ggsw.bytes_count());
-        // println!(
-        //     "encode commits bytes count: {}",
-        //     primus_integer::size::Size::bytes_count(&encode_commits)
-        // );
-        let size = (rotate_ggsw.byte_count()
-            + primus_integer::size::Size::byte_count(&encode_commits))
-            * (party_count - 1);
+    let cipher = Rlwe(decoded_commit);
+    let cipher = cipher.into_ntt_form(&commit_ntt_table);
 
-        let mut size: f64 = (size as f64) / 1024.0;
-        size *= if party_count <= 128 {
-            50.0 / 64.0
-        } else {
-            37.0 / 64.0
-        };
-        println!("communication size: {size}KB");
-        println!("communication size: {}MB", size / 1024.0);
+    let msgs = commit_sk.decrypt(&cipher, commit_params, &commit_ntt_table);
+
+    let is_leader = msgs.iter().all(|&v| v == 0);
+
+    if is_leader {
+        info!("Party {party_id}: I'm leader!",);
     }
 
     degree
 }
 
-fn check_result(
-    _params: &SsleParameters,
-    party_count: usize,
-    threads: Vec<std::thread::JoinHandle<usize>>,
-) {
+fn check_result(party_count: usize, threads: Vec<std::thread::JoinHandle<usize>>) {
     let degrees: Vec<usize> = threads.into_iter().map(|h| h.join().unwrap()).collect();
-    // let poly_length = params.ring_params().poly_length();
 
     let sum = degrees.into_iter().sum::<usize>();
-    // println!("\ndegree sum: {sum}",);
-    // println!("degree mod 2*n: {}", sum % (poly_length * 2));
+
     let leader = sum % party_count;
-    // println!(
-    //     "degree mod 2*n nearest party count: {}",
-    //     (sum - leader) % (poly_length * 2)
-    // );
-    println!("leader: {leader}\n");
-    println!("Parties count: {party_count}");
+
+    info!("leader: {leader}\n");
 }

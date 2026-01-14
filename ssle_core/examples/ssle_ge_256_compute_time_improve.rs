@@ -5,8 +5,9 @@ use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
 use itertools::izip;
+use num::Integer;
 use primus_factor::ShoupFactor;
-use primus_fhe_core::{CrtGlweTraceContext, DcrtGlweDecryptContext};
+use primus_fhe_core::CrtGlweTraceContext;
 use primus_integer::AsInto;
 use primus_lattice::{
     context::DcrtGlevContext,
@@ -21,9 +22,11 @@ use primus_reduce::ops::ReduceInv;
 use rand::{Rng, distr::Uniform};
 use ssle_core::{
     CoefficientExpansionKey, CommitModulus, CommitTable, CommitValueT, CrtValueT, KeyGen,
-    MasterPublicKey, MasterSecretKey, SsleParameters,
+    MasterPublicKey, MasterSecretKey, MasterSecretKeyShare, SsleParameters, generate_dd_random,
 };
 use tabled::{Table, Tabled, settings::Rotate};
+use tracing::{Level, debug, error, info};
+use tracing_subscriber::fmt::format::FmtSpan;
 
 #[cfg(feature = "gt32")]
 const GT32: bool = true;
@@ -51,11 +54,11 @@ struct TimeInfo {
     #[tabled(format = "{:?}")]
     compute_final_encode_commit: Duration,
     #[tabled(format = "{:?}")]
+    distributed_decrypt: Duration,
+    #[tabled(format = "{:?}")]
     decrypt_commit: Duration,
     #[tabled(format = "{:?}")]
     all_compute: Duration,
-    #[tabled(format = "{:?}")]
-    all: Duration,
 }
 
 #[derive(Parser)]
@@ -71,7 +74,8 @@ fn check_args(args: Args) -> (usize, SsleParameters) {
     let party_count = match party_count {
         Some(p) => {
             if !p.is_power_of_two() {
-                panic!("Party count {p} is no power of two!")
+                error!("Party count {p} is not power of two!");
+                panic!("Party count {p} is not power of two!");
             }
             p
         }
@@ -79,25 +83,34 @@ fn check_args(args: Args) -> (usize, SsleParameters) {
     };
 
     let params = if party_count <= 128 || party_count > 2048 {
-        panic!("This example is for party count >= 256!")
+        error!("This example is for party count >= 256!");
+        panic!("This example is for party count >= 256!");
     } else {
         if GT128 {
             SsleParameters::new(party_count)
         } else {
             if GT32 {
+                error!("Don't enable feature `gt32` for party count: {party_count}>128!");
                 panic!("Don't enable feature `gt32` for party count: {party_count}>128!")
             } else {
+                error!("Enable feature `gt128` for party count: {party_count}!");
                 panic!("Enable feature `gt128` for party count: {party_count}!")
             }
         }
     };
 
-    println!("Party count: {party_count}");
+    info!("Party count: {party_count}");
 
     (party_count, params)
 }
 
 fn main() {
+    tracing_subscriber::fmt()
+        .compact()
+        .with_span_events(FmtSpan::CLOSE)
+        .with_max_level(Level::DEBUG)
+        .init();
+
     let args = Args::parse();
 
     let (party_count, params) = check_args(args);
@@ -108,9 +121,18 @@ fn main() {
 
     let (msk, mpk, eck) = KeyGen::generate_keys(&params, rng);
 
-    println!("Key Generation done!");
+    let msk_shares = msk.generate_shares(party_count, rng);
 
-    let time_info = party_operation(party_count, msk, mpk, eck);
+    let dd_randoms = generate_dd_random(
+        party_count,
+        params.ring_params().poly_length() * 2,
+        &params,
+        rng,
+    );
+
+    debug!("Key Generation done!");
+
+    let time_info = party_operation(party_count, msk, mpk, eck, &msk_shares, &dd_randoms);
 
     let mut table = Table::new([time_info]);
     table.with(Rotate::Left);
@@ -123,6 +145,8 @@ fn party_operation(
     msk: MasterSecretKey,
     mpk: MasterPublicKey,
     eck: CoefficientExpansionKey,
+    msk_shares: &[MasterSecretKeyShare],
+    dd_randoms: &[(Vec<CrtValueT>, Vec<CrtValueT>)],
 ) -> TimeInfo {
     let rng = &mut rand::rng();
 
@@ -144,6 +168,7 @@ fn party_operation(
     let big_uint_poly_len = ring_params.big_uint_poly_len();
     let rns_ggsw_len = ggsw_params.rns_ggsw_len();
     let base_q = ring_params.base_q();
+    let big_uint_value_len = ring_params.big_uint_value_len();
 
     let commit_ntt_table =
         CommitTable::new(commit_poly_length.trailing_zeros(), CommitModulus).unwrap();
@@ -174,7 +199,7 @@ fn party_operation(
     };
 
     let mut acc: CrtGlwe<Vec<CrtValueT>> = mpk.generate_init_acc(party_count);
-    let uniform_ring_poly_length = Uniform::new(0, ring_poly_length).unwrap();
+    let uniform_ring_poly_length = Uniform::new(0, ring_poly_length * 2).unwrap();
 
     let all_degree: Vec<usize> = rng
         .sample_iter(uniform_ring_poly_length)
@@ -182,6 +207,7 @@ fn party_operation(
         .collect();
 
     let choose = all_degree.iter().sum::<usize>() % party_count;
+    debug!("Party {choose} is chosen to be leader. This is secret now.");
 
     // Generate commit pk and sk.
     let (all_commit_sk, all_commit_pk): (Vec<_>, Vec<_>) = (0..party_count)
@@ -221,7 +247,28 @@ fn party_operation(
 
     let mut all_encode_commits: Vec<CrtValueT> = vec![0; rns_glwe_len * 2 * party_count];
     let mut final_encode_commits: Vec<CrtValueT> = vec![0; rns_glwe_len * 2];
+    let mut final_commit: Vec<CommitValueT> = vec![0; ring_poly_length * 2];
     let mut decoded_commit: Vec<CommitValueT> = vec![0; commit_poly_length * 2];
+
+    let mut crt_dec_shares: Vec<CrtValueT> = vec![0; rns_poly_len * 2 * party_count];
+    let mut big_uint_dec_shares: Vec<CrtValueT> = vec![0; big_uint_poly_len * 2 * party_count];
+    let mut all_e_shares: Vec<CrtValueT> = vec![0; big_uint_poly_len * 2 * party_count];
+
+    let p = num::BigUint::from(ring_params.plain_modulus_value());
+
+    let q = base_q.moduli_product();
+    let q_big = num::BigUint::from_slice(bytemuck::cast_slice(q.digits()));
+
+    let q_prime_big = q_big.next_multiple_of(&p);
+    let q_prime: primus_integer::BigUint<Vec<CrtValueT>> =
+        primus_integer::BigUint(q_prime_big.iter_u64_digits().collect());
+
+    let delta_prime_big = &q_prime_big / p;
+    let delta_prime: primus_integer::BigUint<Vec<CrtValueT>> =
+        primus_integer::BigUint(delta_prime_big.iter_u64_digits().collect());
+
+    let mut delta_prime_half = delta_prime.clone();
+    delta_prime_half.right_shift_assign(1);
 
     all_encode_commits
         .chunks_exact_mut(rns_glwe_len)
@@ -232,9 +279,10 @@ fn party_operation(
 
     let encode_commits = &mut all_encode_commits[0..rns_glwe_len * 2];
 
+    debug!("Start Relect ...");
+
     let phase1_start = quanta::Instant::now();
 
-    // Check random degree for rgsw
     mpk.generate_rotate_rgsw_inplace(all_degree[0], &mut all_rotate_ggsw[0], rng);
 
     for rotate_rgsw in all_rotate_ggsw.iter() {
@@ -333,7 +381,197 @@ fn party_operation(
 
     let phase1_end = quanta::Instant::now();
 
-    let mut final_commit = sim_thfhe_decrypt(party_count, &msk, ssle_params, final_encode_commits);
+    debug!("The encode commit is computed.");
+
+    debug!("Start Distributed Decryption");
+    debug!("Party 1 to Party {} start decrypt.", party_count - 1);
+
+    for (
+        msk_share,
+        crt_dec_share,
+        big_uint_dec_share,
+        e_share,
+        (r_mod_delta_prime_share, r_mod_q_prime_share),
+    ) in izip!(
+        msk_shares.iter(),
+        crt_dec_shares.chunks_exact_mut(rns_poly_len * 2),
+        big_uint_dec_shares.chunks_exact_mut(big_uint_poly_len * 2),
+        all_e_shares.chunks_exact_mut(big_uint_poly_len * 2),
+        dd_randoms.iter()
+    )
+    .skip(1)
+    {
+        for (encode_commit, crt_dec, big_uint_dec) in izip!(
+            final_encode_commits.chunks_exact(rns_glwe_len),
+            crt_dec_share.chunks_exact_mut(rns_poly_len),
+            big_uint_dec_share.chunks_exact_mut(big_uint_poly_len),
+        ) {
+            msk_share.phase_a_inplace(&DcrtGlwe(encode_commit), &mut DcrtPolynomial(&mut *crt_dec));
+            table.inverse_transform_slice(crt_dec);
+            base_q.compose_multiple_values_inplace(crt_dec, big_uint_dec, ring_poly_length);
+        }
+
+        for (value, e, r_mod_delta_prime, r_mod_q_prime) in izip!(
+            big_uint_dec_share.chunks_exact_mut(big_uint_value_len),
+            e_share.chunks_exact_mut(big_uint_value_len),
+            r_mod_delta_prime_share.chunks_exact(big_uint_value_len),
+            r_mod_q_prime_share.chunks_exact(big_uint_value_len),
+        ) {
+            let mut temp = num::BigUint::from_slice(bytemuck::cast_slice(value));
+
+            temp *= &q_prime_big;
+
+            let (mut temp, rem) = temp.div_rem(&q_big);
+            if rem * 2u8 >= q_big {
+                temp += 1u8;
+            }
+
+            value.fill(0);
+
+            value
+                .iter_mut()
+                .zip(temp.iter_u64_digits())
+                .for_each(|(x, y)| *x = y);
+
+            temp %= &delta_prime_big;
+
+            e.iter_mut()
+                .zip(temp.iter_u64_digits())
+                .for_each(|(x, y)| *x = y);
+
+            primus_integer::BigUint(e)
+                .add_modulo_assign(&primus_integer::BigUint(r_mod_delta_prime), &delta_prime);
+
+            primus_integer::BigUint(value)
+                .add_modulo_assign(&primus_integer::BigUint(r_mod_q_prime), &q_prime);
+        }
+    }
+
+    debug!("Party 1 to Party {} end decrypt.", party_count - 1);
+
+    debug!("Party 0 start decrypt.");
+
+    let ddec_start = quanta::Instant::now();
+
+    for (
+        msk_share,
+        crt_dec_share,
+        big_uint_dec_share,
+        e_share,
+        (r_mod_delta_prime_share, r_mod_q_prime_share),
+    ) in izip!(
+        msk_shares.iter(),
+        crt_dec_shares.chunks_exact_mut(rns_poly_len * 2),
+        big_uint_dec_shares.chunks_exact_mut(big_uint_poly_len * 2),
+        all_e_shares.chunks_exact_mut(big_uint_poly_len * 2),
+        dd_randoms.iter()
+    )
+    .take(1)
+    {
+        for (encode_commit, crt_dec, big_uint_dec) in izip!(
+            final_encode_commits.chunks_exact(rns_glwe_len),
+            crt_dec_share.chunks_exact_mut(rns_poly_len),
+            big_uint_dec_share.chunks_exact_mut(big_uint_poly_len),
+        ) {
+            msk_share.phase_inplace(&DcrtGlwe(encode_commit), &mut DcrtPolynomial(&mut *crt_dec));
+            table.inverse_transform_slice(crt_dec);
+            base_q.compose_multiple_values_inplace(crt_dec, big_uint_dec, ring_poly_length);
+        }
+
+        for (value, e, r_mod_delta_prime, r_mod_q_prime) in izip!(
+            big_uint_dec_share.chunks_exact_mut(big_uint_value_len),
+            e_share.chunks_exact_mut(big_uint_value_len),
+            r_mod_delta_prime_share.chunks_exact(big_uint_value_len),
+            r_mod_q_prime_share.chunks_exact(big_uint_value_len),
+        ) {
+            let mut temp = num::BigUint::from_slice(bytemuck::cast_slice(value));
+
+            temp *= &q_prime_big;
+
+            let (mut temp, rem) = temp.div_rem(&q_big);
+            if rem * 2u8 >= q_big {
+                temp += 1u8;
+            }
+
+            value.fill(0);
+
+            value
+                .iter_mut()
+                .zip(temp.iter_u64_digits())
+                .for_each(|(x, y)| *x = y);
+
+            temp %= &delta_prime_big;
+
+            e.iter_mut()
+                .zip(temp.iter_u64_digits())
+                .for_each(|(x, y)| *x = y);
+
+            primus_integer::BigUint(e)
+                .add_modulo_assign(&primus_integer::BigUint(r_mod_delta_prime), &delta_prime);
+
+            primus_integer::BigUint(value)
+                .add_modulo_assign(&primus_integer::BigUint(r_mod_q_prime), &q_prime);
+        }
+    }
+
+    let (p0_e_share, other_e_shares) = all_e_shares.split_at_mut(big_uint_poly_len * 2);
+
+    for e_share in other_e_shares.chunks_exact(big_uint_poly_len * 2) {
+        for (value, e) in izip!(
+            p0_e_share.chunks_exact_mut(big_uint_value_len),
+            e_share.chunks_exact(big_uint_value_len),
+        ) {
+            primus_integer::BigUint(value)
+                .add_modulo_assign(&primus_integer::BigUint(e), &delta_prime);
+        }
+    }
+
+    for value in p0_e_share.chunks_exact_mut(big_uint_value_len) {
+        let mut value = primus_integer::BigUint(value);
+
+        if value.cmp(&delta_prime_half).is_ge() {
+            value.neg_modulo_assign(&delta_prime);
+        }
+    }
+
+    let (p0_big_uint_dec_share, other_big_uint_dec_share) =
+        big_uint_dec_shares.split_at_mut(big_uint_poly_len * 2);
+
+    for (value, e) in p0_big_uint_dec_share
+        .chunks_exact_mut(big_uint_value_len)
+        .zip(p0_e_share.chunks_exact(big_uint_value_len))
+    {
+        primus_integer::BigUint(value).sub_modulo_assign(&primus_integer::BigUint(e), &q_prime);
+    }
+
+    for big_uint_dec_share in other_big_uint_dec_share.chunks_exact(big_uint_poly_len * 2) {
+        for (x, y) in p0_big_uint_dec_share
+            .chunks_exact_mut(big_uint_value_len)
+            .zip(big_uint_dec_share.chunks_exact(big_uint_value_len))
+        {
+            primus_integer::BigUint(x).add_modulo_assign(&primus_integer::BigUint(y), &q_prime);
+        }
+    }
+
+    for (a, b) in final_commit
+        .iter_mut()
+        .zip(p0_big_uint_dec_share.chunks_exact(big_uint_value_len))
+    {
+        let b = num::BigUint::from_slice(bytemuck::cast_slice(b));
+        let (mut b, rem) = b.div_rem(&delta_prime_big);
+        if rem * 2u8 >= delta_prime_big {
+            b += 1u8;
+        }
+        *a = b.iter_u32_digits().next().unwrap_or(0);
+    }
+
+    let ddec_end = quanta::Instant::now();
+
+    debug!("Party 0 finish decrypt.");
+
+    debug!("Decrypt done, start final verifying.");
+
+    debug!("Party {choose}: start verifying.",);
 
     let phase2_start = quanta::Instant::now();
 
@@ -383,59 +621,29 @@ fn party_operation(
     let phase2_end = quanta::Instant::now();
 
     if is_leader {
-        println!("\nParty {choose}: I'm leader!",);
+        info!("Party {choose}: I'm leader!",);
     }
+
+    debug!("Verify done.");
+    debug!("Relect done.");
 
     let rlwe_mul_rgsw = expand_partial_coefficients_start - phase1_start;
     let expand_coefficients = expand_partial_coefficients_end - expand_partial_coefficients_start;
     let compute_local_encode_commit = encode_mid - expand_partial_coefficients_end;
     let compute_final_encode_commit = phase1_end - encode_mid;
+    let distributed_decrypt = ddec_end - ddec_start;
 
     let info = TimeInfo {
         rlwe_mul_rgsw,
         compute_local_encode_commit,
         compute_final_encode_commit,
         expand_coefficients,
+        distributed_decrypt,
         decrypt_commit: phase2_end - phase2_start,
-        all_compute: (phase1_end - phase1_start) + (phase2_end - phase2_start),
-        all: phase2_end - phase1_start,
+        all_compute: (phase1_end - phase1_start)
+            + distributed_decrypt
+            + (phase2_end - phase2_start),
     };
 
     info
-}
-
-fn sim_thfhe_decrypt(
-    _party_count: usize,
-    msk: &MasterSecretKey,
-    params: &SsleParameters,
-    encoded_commits: Vec<CrtValueT>,
-) -> Vec<CommitValueT> {
-    let ring_params = params.ring_params();
-    let ring_poly_length = ring_params.poly_length();
-
-    let mid = encoded_commits.len() / 2;
-
-    let mut commit_data: Vec<CrtValueT> = vec![0; ring_poly_length * 2];
-    let mut context =
-        DcrtGlweDecryptContext::new(ring_params.cipher_moduli_count(), ring_poly_length);
-
-    for (poly, encoded_commit) in commit_data
-        .chunks_mut(ring_poly_length)
-        .zip(encoded_commits.chunks_exact(mid))
-    {
-        msk.decrypt_inplace(
-            &DcrtGlwe(encoded_commit),
-            &mut Polynomial(poly),
-            params.ring_params(),
-            msk.table(),
-            &mut context,
-        );
-    }
-
-    let final_commit: Vec<CommitValueT> = commit_data
-        .into_iter()
-        .map(|v| v.try_into().unwrap())
-        .collect();
-
-    final_commit
 }

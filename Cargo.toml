@@ -12,6 +12,7 @@ rayon = "1.11.0"
 itertools = "0.14.0"
 indicatif = { version = "0.18", features = ["rayon"] }
 mimalloc = "0.1.47"
+tracing = "0.1"
 
 primus_integer = { path = "../primus/primus_integer" }
 primus_reduce = { path = "../primus/primus_reduce" }
