@@ -1,7 +1,6 @@
 // cargo run --release --package ssle_core --example check_commit -- -p 4
 // cargo run --release --package ssle_core --example check_commit --features="gt32" -- -p 64
 // cargo run --release --package ssle_core --example check_commit --features="gt128" -- -p 256
-// cargo +nightly run --release --package ssle_core --example check_commit --features="nightly" -- -p 4
 
 use std::sync::Arc;
 

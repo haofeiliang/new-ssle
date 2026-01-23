@@ -2,7 +2,7 @@
 
 ## Install Rust
 
-This project relies on Rust and the nightly toolchain. Installation can be done by following these steps:
+This project relies on Rust. Installation can be done by following these steps:
 
 1. Install Rust using rustup (the recommended Rust installer):
    ```bash
@@ -15,14 +15,9 @@ This project relies on Rust and the nightly toolchain. Installation can be done 
    cargo --version
    ```
 
-3. Install the nightly toolchain:
+3. Verify the rust toolchain is available:
    ```bash
-   rustup toolchain install nightly
-   ```
-
-4. Verify the nightly toolchain is available:
-   ```bash
-   rustc +nightly --version
+   rustc --version
    ```
 
 For more information, see the [Rust installation guide](https://www.rust-lang.org/tools/install).
@@ -40,17 +35,13 @@ For more information, see the [Rust installation guide](https://www.rust-lang.or
 
 ### For AVX512 support:
 
-Note: AVX512 support requires:
-1. Nightly Rust toolchain
-2. CPU with AVX512 support
-3. `--features="nightly"` flag when running
+Note: AVX512 support requires CPU with AVX512 support
+
 
 ### Run our codes with parties count $G$ in [2, 4, 8, 16, 32]
 
 ```bash
 cargo run --release --package ssle_core --example ssle_compute_time -- -p 4
-# or enable avx512
-cargo +nightly run --release --package ssle_core --example ssle_compute_time --features="nightly" -- -p 4
 ```
 
 Expected output:
@@ -86,8 +77,6 @@ communication size: 2.34375MB
 
 ```bash
 cargo run --release --package ssle_core --example ssle_compute_time --features="gt32" -- -p 64
-# or enable avx512
-cargo +nightly run --release --package ssle_core --example ssle_compute_time --features="nightly gt32" -- -p 64
 ```
 
 Expected output:
@@ -123,8 +112,6 @@ communication size: 73.828125MB
 
 ```bash
 cargo run --release --package ssle_core --example ssle_ge_256_compute_time_improve --features="gt128" -- -p 256
-# or enable avx512
-cargo +nightly run --release --package ssle_core --example ssle_ge_256_compute_time_improve --features="nightly gt128" -- -p 256
 ```
 
 Expected output:

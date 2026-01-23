@@ -1,5 +1,4 @@
 // cargo run --release --package ssle_core --example ssle_ge_256_compute_time_improve --features="gt128" -- -p 256
-// cargo +nightly run --release --package ssle_core --example ssle_ge_256_compute_time_improve --features="nightly gt128" -- -p 256
 
 use std::{sync::Arc, time::Duration};
 

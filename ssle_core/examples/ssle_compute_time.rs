@@ -1,9 +1,6 @@
 // cargo run --release --package ssle_core --example ssle_compute_time -- -p 4
 // cargo run --release --package ssle_core --example ssle_compute_time --features="gt32" -- -p 64
 // cargo run --release --package ssle_core --example ssle_compute_time --features="gt128" -- -p 256
-// cargo +nightly run --release --package ssle_core --example ssle_compute_time --features="nightly" -- -p 4
-// cargo +nightly run --release --package ssle_core --example ssle_compute_time --features="nightly gt32" -- -p 64
-// cargo +nightly run --release --package ssle_core --example ssle_compute_time --features="nightly gt128" -- -p 256
 
 use std::{sync::Arc, time::Duration};
 
