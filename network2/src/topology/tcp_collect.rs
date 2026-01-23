@@ -22,25 +22,20 @@ impl TcpCollect {
         if party_id == 0 {
             let listener = tokio::net::TcpListener::bind(participants[0].address).await?;
 
-            let listen_handle = tokio::spawn(async move {
-                let mut i = party_count - 1;
-                let mut connections = Vec::with_capacity(i);
-                while i != 0 {
-                    let (mut tcp_stream, _addr) = listener.accept().await?;
+            let mut i = party_count - 1;
+            let mut connections = Vec::with_capacity(i);
+            while i != 0 {
+                let (mut tcp_stream, _addr) = listener.accept().await?;
 
-                    tcp_stream.set_nodelay(true)?;
+                tcp_stream.set_nodelay(true)?;
 
-                    let peer_id = tcp_stream.read_u32().await?;
+                let peer_id = tcp_stream.read_u32().await?;
 
-                    connections.push((peer_id, Role::Server, tcp_stream));
+                connections.push((peer_id, Role::Server, tcp_stream));
 
-                    i -= 1;
-                }
+                i -= 1;
+            }
 
-                anyhow::Ok(connections)
-            });
-
-            let mut connections = listen_handle.await??;
             connections.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
             let connections: Vec<_> = connections
@@ -82,9 +77,20 @@ impl TcpCollect {
         }
     }
 
-    pub async fn collect(&self, data: &'static mut [u8], chunk_size: usize) -> anyhow::Result<()> {
+    pub async fn sync(&self) -> anyhow::Result<()> {
         if self.party_id == 0 {
-            assert_eq!(data.len(), chunk_size * (self.party_count - 1));
+            let mut ready_tasks = Vec::with_capacity(self.party_count - 1);
+            for conn in self.connections.iter() {
+                let conn_r = conn.clone();
+                ready_tasks.push(tokio::spawn(async move {
+                    let mut ready_signal = [0u8; 1];
+                    conn_r.recv(&mut ready_signal).await?;
+                    anyhow::Ok(())
+                }));
+            }
+            for task in ready_tasks {
+                task.await??;
+            }
 
             let mut send_tasks = Vec::with_capacity(self.party_count - 1);
             for conn in self.connections.iter() {
@@ -94,29 +100,59 @@ impl TcpCollect {
                     anyhow::Ok(())
                 }));
             }
+            for task in send_tasks {
+                task.await??;
+            }
+        } else {
+            self.connections[0].clone().send(&[0x00]).await?;
 
-            let mut recv_tasks = Vec::with_capacity(self.party_count - 1);
+            let mut start_signal = [0u8; 1];
+            self.connections[0].clone().recv(&mut start_signal).await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn collect(
+        &self,
+        data: &'static mut [u8],
+        chunk_size: usize,
+        iter_count: u32,
+    ) -> anyhow::Result<()> {
+        if self.party_id == 0 {
+            assert_eq!(data.len(), chunk_size * (self.party_count - 1));
+
+            let mut tasks = Vec::with_capacity(self.party_count - 1);
 
             let chunks: Vec<&'static mut [u8]> = data.chunks_exact_mut(chunk_size).collect();
 
             for (conn, recv_chunk) in self.connections.iter().zip(chunks) {
-                let conn_r = conn.clone();
-                recv_tasks.push(tokio::spawn(async move {
-                    conn_r.recv(recv_chunk).await?;
+                let conn_clone = conn.clone();
+
+                tasks.push(tokio::spawn(async move {
+                    for _ in 0..iter_count {
+                        conn_clone.clone().recv(recv_chunk).await?;
+
+                        conn_clone.clone().send(&[0x02]).await?;
+                    }
                     anyhow::Ok(())
                 }));
             }
 
-            for task in recv_tasks {
+            for task in tasks {
                 task.await??;
             }
         } else {
             assert_eq!(data.len(), chunk_size);
 
-            let mut sync_signal = [0u8; 1];
-            self.connections[0].clone().recv(&mut sync_signal).await?;
+            let conn = self.connections[0].clone();
 
-            self.connections[0].clone().send(data).await?;
+            for _ in 0..iter_count {
+                conn.clone().send(data).await?;
+
+                let mut ack_signal = [0u8; 1];
+                conn.clone().recv(&mut ack_signal).await?;
+            }
         }
 
         Ok(())

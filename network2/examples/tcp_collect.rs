@@ -103,33 +103,34 @@ async fn main() -> anyhow::Result<()> {
             rng.fill_bytes(&mut data);
         }
 
+        tcp_collect.sync().await?;
         let data_static: &'static mut [u8] = unsafe { transmute(data.as_mut_slice()) };
-        tcp_collect.collect(data_static, chunk_size).await?;
+        tcp_collect.collect(data_static, chunk_size, 1).await?;
 
+        tcp_collect.sync().await?;
         if id == 0 {
+            let data_static: &'static mut [u8] = unsafe { transmute(data.as_mut_slice()) };
+            tcp_collect
+                .collect(data_static, chunk_size, ITER_COUNT)
+                .await?;
+        } else {
             let start_time = quanta::Instant::now();
 
-            for _j in 0..ITER_COUNT {
-                let data_static: &'static mut [u8] = unsafe { transmute(data.as_mut_slice()) };
-                tcp_collect.collect(data_static, chunk_size).await?;
-            }
+            let data_static: &'static mut [u8] = unsafe { transmute(data.as_mut_slice()) };
+            tcp_collect
+                .collect(data_static, chunk_size, ITER_COUNT)
+                .await?;
 
-            let duration = start_time.elapsed();
+            let total_duration = start_time.elapsed();
 
-            let avg_time = duration / ITER_COUNT;
-
+            let avg_time = total_duration / ITER_COUNT;
             result.push(avg_time.as_micros() as f64 / 1000.0);
-        } else {
-            for _j in 0..ITER_COUNT {
-                let data_static: &'static mut [u8] = unsafe { transmute(data.as_mut_slice()) };
-                tcp_collect.collect(data_static, chunk_size).await?;
-            }
         }
     }
 
     tcp_collect.close().await?;
 
-    if id == 0 {
+    if id > 0 {
         let file = File::create(&format!("p{party_count}_id{id}_tcp_{suffix}.csv"))?;
 
         let writer = BufWriter::new(file);

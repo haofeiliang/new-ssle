@@ -45,8 +45,3 @@ tracing-subscriber = { version = "0.3", features = [
 [features]
 gt32 = []
 gt128 = []
-nightly = [
-    "primus_ntt/nightly",
-    "primus_lattice/nightly",
-    "primus_fhe_core/nightly",
-]
