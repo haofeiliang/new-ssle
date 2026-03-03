@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use primus_fhe_core::{
-    CrtGlevParameters, CrtGlweCiphertext, CrtGlweSecretKey, CrtGlweTraceContext, CrtGlweTraceKey,
-    DcrtGlwePublicKey, DcrtGlweSecretKey,
+    CrtGlevParameters, CrtGlweSecretKey, DcrtGlweCiphertext, DcrtGlweExpandCoeffContext,
+    DcrtGlweExpandCoeffKey, DcrtGlweExpandCoeffSyncPool, DcrtGlwePublicKey, DcrtGlweSecretKey,
 };
 use primus_integer::{Data, DataMut, RawData};
 use primus_modulus::BarrettModulus;
@@ -35,7 +35,7 @@ impl KeyGen {
 
         let eck = CoefficientExpansionKey::new(
             params.expand_coeff_params_for_key_gen(),
-            &sk,
+            ring_params.base_q(),
             &dcrt_sk,
             Arc::clone(&table),
             rng,
@@ -51,13 +51,13 @@ impl KeyGen {
 
 #[derive(Clone)]
 pub struct CoefficientExpansionKey {
-    trace_key: CrtGlweTraceKey<CrtValueT, CrtTable>,
+    expand_coeff_key: DcrtGlweExpandCoeffKey<CrtValueT, CrtTable>,
 }
 
 impl CoefficientExpansionKey {
     pub fn new<R>(
         params: &CrtGlevParameters<CrtValueT, BarrettModulus<CrtValueT>>,
-        sk: &CrtGlweSecretKey<CrtValueT>,
+        rns_base: &RNSBase<CrtValueT, BarrettModulus<CrtValueT>>,
         dcrt_sk: &DcrtGlweSecretKey<CrtValueT>,
         table: Arc<CrtTable>,
         rng: &mut R,
@@ -66,23 +66,41 @@ impl CoefficientExpansionKey {
         R: rand::Rng + rand::CryptoRng,
     {
         Self {
-            trace_key: CrtGlweTraceKey::new(params, sk, dcrt_sk, table, rng),
+            expand_coeff_key: DcrtGlweExpandCoeffKey::new(params, rns_base, dcrt_sk, table, rng),
         }
     }
 
     pub fn expand_partial_coefficients_inplace<M, A, B>(
         &self,
-        ciphertext: &CrtGlweCiphertext<A>,
-        result: &mut [CrtGlweCiphertext<B>],
+        ciphertext: &DcrtGlweCiphertext<A>,
+        result: &mut [DcrtGlweCiphertext<B>],
         params: &CrtGlevParameters<CrtValueT, M>,
         rns_base: &RNSBase<CrtValueT, M>,
-        context: &mut CrtGlweTraceContext<CrtValueT>,
+        context: &mut DcrtGlweExpandCoeffContext<CrtValueT>,
     ) where
         M: FieldContext<CrtValueT>,
         A: RawData<Elem = CrtValueT> + Data,
         B: RawData<Elem = CrtValueT> + DataMut,
     {
-        self.trace_key
+        self.expand_coeff_key
             .expand_partial_coefficients_inplace(ciphertext, result, params, rns_base, context)
+    }
+
+    pub fn expand_partial_coefficients_inplace_parallel<M, A, B>(
+        &self,
+        ciphertext: &DcrtGlweCiphertext<A>,
+        result: &mut [DcrtGlweCiphertext<B>],
+        params: &CrtGlevParameters<CrtValueT, M>,
+        rns_base: &RNSBase<CrtValueT, M>,
+        context: &mut DcrtGlweExpandCoeffSyncPool<CrtValueT>,
+    ) where
+        M: FieldContext<CrtValueT>,
+        A: RawData<Elem = CrtValueT> + Data + Sync,
+        B: RawData<Elem = CrtValueT> + DataMut + Send,
+    {
+        self.expand_coeff_key
+            .expand_partial_coefficients_inplace_parallel(
+                ciphertext, result, params, rns_base, context,
+            )
     }
 }

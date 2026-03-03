@@ -1,6 +1,9 @@
 // cargo run --release --package ssle_core --example ssle -- -p 4
+// cargo run --release --package ssle_core --example ssle --features="parallel" -- -p 4 -t 2
 // cargo run --release --package ssle_core --example ssle --features="gt32" -- -p 64
+// cargo run --release --package ssle_core --example ssle --features="gt32 parallel" -- -p 64 -t 8
 // cargo run --release --package ssle_core --example ssle --features="gt128" -- -p 256
+// cargo run --release --package ssle_core --example ssle --features="gt128 parallel" -- -p 256 -t 16
 
 use std::sync::Arc;
 
@@ -9,7 +12,11 @@ use itertools::izip;
 use mimalloc::MiMalloc;
 use network::{Id, netio::Participant};
 use num::Integer;
-use primus_fhe_core::{CrtGlweTraceContext, NttRlwePublicKey};
+#[cfg(not(feature = "parallel"))]
+use primus_fhe_core::DcrtGlweExpandCoeffContext;
+#[cfg(feature = "parallel")]
+use primus_fhe_core::DcrtGlweExpandCoeffSyncPool;
+use primus_fhe_core::NttRlwePublicKey;
 use primus_integer::{AsInto, BigUint, DataMut};
 use primus_lattice::{
     context::DcrtGlevContext,
@@ -20,12 +27,12 @@ use primus_lattice::{
 use primus_ntt::{DcrtTable, NttTable};
 use primus_poly::{ArrayBase, DcrtPolynomial, Polynomial, PolynomialOwned};
 use primus_reduce::Modulus;
-use rand::Rng;
+use rand::RngExt;
 use ssle_core::{
     CoefficientExpansionKey, CommitModulus, CommitTable, CommitValueT, CrtValueT, KeyGen,
     MasterPublicKey, MasterSecretKeyShare, Party, SsleParameters, generate_dd_random,
 };
-use tracing::{Level, debug, error, info, warn};
+use tracing::{Level, debug, error, info};
 use tracing_subscriber::fmt::format::FmtSpan;
 
 #[cfg(feature = "gt32")]
@@ -60,6 +67,11 @@ fn check_args(args: Args) -> (usize, usize, SsleParameters) {
     let party_count = args.party_count;
 
     let max_cpu_cores = num_cpus::get();
+
+    #[cfg(not(feature = "parallel"))]
+    if thread_count != 1 {
+        panic!("Enable feature `parallel` for thread count {thread_count} > 1");
+    }
 
     let party_count = match party_count {
         Some(p) => {
@@ -114,11 +126,6 @@ fn check_args(args: Args) -> (usize, usize, SsleParameters) {
 
     info!("Party count: {party_count}");
     info!("Thread count per party: {thread_count}");
-    if thread_count > 1 {
-        warn!(
-            "The current code implementation is not optimized for multithreading, so only one thread will be used per party."
-        )
-    }
 
     (party_count, thread_count, params)
 }
@@ -218,7 +225,17 @@ fn party_operation(
     let mut external_product_context =
         DcrtGlevContext::new(ring_poly_length, rns_poly_len, big_uint_poly_len);
 
-    let mut expand_coeff_context = CrtGlweTraceContext::new(
+    #[cfg(not(feature = "parallel"))]
+    let mut expand_coeff_context = DcrtGlweExpandCoeffContext::new(
+        expand_coeff_params.dimension(),
+        ring_poly_length,
+        rns_poly_len,
+        big_uint_poly_len,
+    );
+
+    #[cfg(feature = "parallel")]
+    let mut expand_coeff_context_pool = DcrtGlweExpandCoeffSyncPool::with_capacity(
+        rayon::current_num_threads(),
         expand_coeff_params.dimension(),
         ring_poly_length,
         rns_poly_len,
@@ -310,7 +327,9 @@ fn party_operation(
         debug!("Party {party_id}: Start aggregate all randomness.");
     }
 
-    for rotate_rgsw in all_rotate_ggsw.iter() {
+    let (last, pre) = all_rotate_ggsw.split_last().unwrap();
+
+    for rotate_rgsw in pre.iter() {
         acc.mul_dcrt_ggsw_inplace(
             rotate_rgsw,
             &mut temp_dcrt_glwe,
@@ -323,27 +342,38 @@ fn party_operation(
         temp_dcrt_glwe.to_coeff_form_inplace(&mut acc, table);
     }
 
-    let mut expand_result = vec![<CrtGlwe<Vec<CrtValueT>>>::zero(rns_glwe_len); party_count];
+    acc.mul_dcrt_ggsw_inplace(
+        last,
+        &mut temp_dcrt_glwe,
+        ggsw_params.basis(),
+        table,
+        ring_params.base_q(),
+        &mut external_product_context,
+    );
+
     let mut selectors = vec![<DcrtGlwe<Vec<CrtValueT>>>::zero(rns_glwe_len); party_count];
 
     if party_id == 0 {
         debug!("Party {party_id}: Start generate Selectors.");
     }
 
+    #[cfg(not(feature = "parallel"))]
     eck.expand_partial_coefficients_inplace(
-        &acc,
-        &mut expand_result,
+        &temp_dcrt_glwe,
+        &mut selectors,
         &expand_coeff_params,
         ring_params.base_q(),
         &mut expand_coeff_context,
     );
 
-    expand_result
-        .iter()
-        .zip(selectors.iter_mut())
-        .for_each(|(x, y)| {
-            x.to_ntt_form_inplace(y, table);
-        });
+    #[cfg(feature = "parallel")]
+    eck.expand_partial_coefficients_inplace_parallel(
+        &temp_dcrt_glwe,
+        &mut selectors,
+        &expand_coeff_params,
+        ring_params.base_q(),
+        &mut expand_coeff_context_pool,
+    );
 
     if party_id == 0 {
         debug!("Party {party_id}: Start re-randomize commit.");

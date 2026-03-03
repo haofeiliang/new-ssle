@@ -1,6 +1,9 @@
 // cargo run --release --package ssle_core --example ssle_compute_time -- -p 4
+// cargo run --release --package ssle_core --example ssle_compute_time --features="parallel" -- -p 4 -t 4
 // cargo run --release --package ssle_core --example ssle_compute_time --features="gt32" -- -p 64
+// cargo run --release --package ssle_core --example ssle_compute_time --features="gt32 parallel" -- -p 64 -t 8
 // cargo run --release --package ssle_core --example ssle_compute_time --features="gt128" -- -p 256
+// cargo run --release --package ssle_core --example ssle_compute_time --features="gt128 parallel" -- -p 256 -t 8
 
 use std::{sync::Arc, time::Duration};
 
@@ -8,7 +11,10 @@ use clap::Parser;
 use itertools::izip;
 use num::Integer;
 use primus_factor::ShoupFactor;
-use primus_fhe_core::CrtGlweTraceContext;
+#[cfg(not(feature = "parallel"))]
+use primus_fhe_core::DcrtGlweExpandCoeffContext;
+#[cfg(feature = "parallel")]
+use primus_fhe_core::DcrtGlweExpandCoeffSyncPool;
 use primus_integer::AsInto;
 use primus_lattice::{
     context::DcrtGlevContext,
@@ -20,7 +26,7 @@ use primus_ntt::{DcrtTable, NttTable};
 use primus_poly::{ArrayBase, DcrtPolynomial, Polynomial, PolynomialOwned};
 use primus_reduce::Modulus;
 use primus_reduce::ops::ReduceInv;
-use rand::{Rng, distr::Uniform};
+use rand::{RngExt, distr::Uniform};
 use ssle_core::{
     CoefficientExpansionKey, CommitModulus, CommitTable, CommitValueT, CrtValueT, KeyGen,
     MasterPublicKey, MasterSecretKey, MasterSecretKeyShare, SsleParameters, generate_dd_random,
@@ -64,13 +70,17 @@ struct TimeInfo {
 
 #[derive(Parser)]
 struct Args {
+    /// thread count per party
+    #[arg(short = 't', long)]
+    thread_count: Option<usize>,
     /// party count
     #[arg(short = 'p', long)]
     party_count: Option<usize>,
 }
 
-fn check_args(args: Args) -> (usize, SsleParameters) {
+fn check_args(args: Args) -> (usize, usize, SsleParameters) {
     let party_count = args.party_count;
+    let thread_count = args.thread_count.unwrap_or(1);
 
     let party_count = match party_count {
         Some(p) => {
@@ -82,6 +92,16 @@ fn check_args(args: Args) -> (usize, SsleParameters) {
         }
         None => 2,
     };
+
+    #[cfg(feature = "parallel")]
+    if thread_count > num_cpus::get() {
+        panic!("Your CPU has not enough cores!")
+    }
+
+    #[cfg(not(feature = "parallel"))]
+    if thread_count != 1 {
+        panic!("Enable feature `parallel` for thread count {thread_count} > 1");
+    }
 
     let params = if party_count <= 32 {
         if !GT32 && !GT128 {
@@ -121,7 +141,7 @@ fn check_args(args: Args) -> (usize, SsleParameters) {
 
     info!("Party count: {party_count}");
 
-    (party_count, params)
+    (party_count, thread_count, params)
 }
 
 fn main() {
@@ -133,7 +153,14 @@ fn main() {
 
     let args = Args::parse();
 
-    let (party_count, params) = check_args(args);
+    #[allow(unused_variables)]
+    let (party_count, num_threads, params) = check_args(args);
+
+    #[cfg(feature = "parallel")]
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(num_threads)
+        .build_global()
+        .unwrap();
 
     let params = Arc::new(params);
 
@@ -196,7 +223,17 @@ fn party_operation(
     let mut external_product_context =
         DcrtGlevContext::new(ring_poly_length, rns_poly_len, big_uint_poly_len);
 
-    let mut expand_coeff_context = CrtGlweTraceContext::new(
+    #[cfg(not(feature = "parallel"))]
+    let mut expand_coeff_context = DcrtGlweExpandCoeffContext::new(
+        expand_coeff_params.dimension(),
+        ring_poly_length,
+        rns_poly_len,
+        big_uint_poly_len,
+    );
+
+    #[cfg(feature = "parallel")]
+    let mut expand_coeff_context_pool = DcrtGlweExpandCoeffSyncPool::with_capacity(
+        rayon::current_num_threads(),
         expand_coeff_params.dimension(),
         ring_poly_length,
         rns_poly_len,
@@ -259,7 +296,6 @@ fn party_operation(
 
     let mut ex_product_glwe: DcrtGlwe<Vec<CrtValueT>> = DcrtGlwe::zero(rns_glwe_len);
 
-    let mut expand_result = vec![<CrtGlwe<Vec<CrtValueT>>>::zero(rns_glwe_len); party_count];
     let mut selectors = vec![<DcrtGlwe<Vec<CrtValueT>>>::zero(rns_glwe_len); party_count];
 
     let mut temp: Vec<CrtValueT> = vec![0; ring_poly_length];
@@ -309,7 +345,9 @@ fn party_operation(
 
     mpk.generate_rotate_rgsw_inplace(all_degree[0], &mut all_rotate_ggsw[0], rng);
 
-    for rotate_rgsw in all_rotate_ggsw.iter() {
+    let (last, pre) = all_rotate_ggsw.split_last().unwrap();
+
+    for rotate_rgsw in pre.iter() {
         acc.mul_dcrt_ggsw_inplace(
             rotate_rgsw,
             &mut ex_product_glwe,
@@ -322,22 +360,34 @@ fn party_operation(
         ex_product_glwe.to_coeff_form_inplace(&mut acc, table);
     }
 
+    acc.mul_dcrt_ggsw_inplace(
+        last,
+        &mut ex_product_glwe,
+        ggsw_params.basis(),
+        table,
+        base_q,
+        &mut external_product_context,
+    );
+
     let expand_partial_coefficients_start = quanta::Instant::now();
 
+    #[cfg(not(feature = "parallel"))]
     eck.expand_partial_coefficients_inplace(
-        &acc,
-        &mut expand_result,
+        &ex_product_glwe,
+        &mut selectors,
         &expand_coeff_params,
         base_q,
         &mut expand_coeff_context,
     );
 
-    expand_result
-        .iter()
-        .zip(selectors.iter_mut())
-        .for_each(|(x, y)| {
-            x.to_ntt_form_inplace(y, table);
-        });
+    #[cfg(feature = "parallel")]
+    eck.expand_partial_coefficients_inplace_parallel(
+        &ex_product_glwe,
+        &mut selectors,
+        &expand_coeff_params,
+        base_q,
+        &mut expand_coeff_context_pool,
+    );
 
     let expand_partial_coefficients_end = quanta::Instant::now();
 

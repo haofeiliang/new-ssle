@@ -8,7 +8,7 @@ use std::{
 use clap::Parser;
 use mimalloc::MiMalloc;
 use network2::{Id, Participant, TcpCollect};
-use rand::RngCore;
+use rand::Rng;
 
 const ITER_COUNT: u32 = 10;
 

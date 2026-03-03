@@ -9,7 +9,10 @@ use primus_integer::{Data, DataMut, RawData, izip};
 use primus_ntt::DcrtTable;
 use primus_poly::{DcrtPolynomial, Polynomial};
 use primus_reduce::FieldContext;
-use rand::distr::{Distribution, Uniform};
+use rand::{
+    RngExt,
+    distr::{Distribution, Uniform},
+};
 
 use crate::{CrtTable, CrtValueT, SsleParameters};
 

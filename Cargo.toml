@@ -4,14 +4,14 @@ resolver = "3"
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
-rand = "0.9"
+rand = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 bytes = { version = "1", features = ["serde"] }
-bytemuck = "1.23"
-rayon = "1.11.0"
-itertools = "0.14.0"
+bytemuck = "1.25"
+rayon = "1.11"
+itertools = "0.14"
 indicatif = { version = "0.18", features = ["rayon"] }
-mimalloc = "0.1.47"
+mimalloc = "0.1"
 tracing = "0.1"
 
 primus_integer = { path = "../primus/primus_integer" }
