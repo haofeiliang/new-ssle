@@ -28,8 +28,8 @@ use ssle_core::{
     MasterPublicKey, MasterSecretKey, MasterSecretKeyShare, SsleParameters, generate_dd_random,
 };
 use tabled::{Table, Tabled, settings::Rotate};
-use tracing::{Level, debug, error, info};
-use tracing_subscriber::fmt::format::FmtSpan;
+use tracing::{debug, error, info, level_filters::LevelFilter};
+use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 
 #[cfg(feature = "gt32")]
 const GT32: bool = true;
@@ -125,7 +125,11 @@ fn main() {
     tracing_subscriber::fmt()
         .compact()
         .with_span_events(FmtSpan::CLOSE)
-        .with_max_level(Level::DEBUG)
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::DEBUG.into())
+                .from_env_lossy(),
+        )
         .init();
 
     let args = Args::parse();
