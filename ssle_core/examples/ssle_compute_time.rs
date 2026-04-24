@@ -214,6 +214,7 @@ fn party_operation(
     let table = mpk.table();
 
     let commit_rlwe_len = commit_poly_length * 2;
+    let moduli_count = ring_params.cipher_moduli_count();
     let rns_poly_len = ring_params.rns_poly_len();
     let rns_glwe_len = ring_params.rns_glwe_len();
     let big_uint_poly_len = ring_params.big_uint_poly_len();
@@ -224,8 +225,12 @@ fn party_operation(
     let commit_ntt_table =
         CommitTable::new(commit_poly_length.trailing_zeros(), CommitModulus).unwrap();
 
-    let mut external_product_context =
-        DcrtGlevContext::new(ring_poly_length, rns_poly_len, big_uint_poly_len);
+    let mut external_product_context = DcrtGlevContext::new(
+        ring_poly_length,
+        rns_poly_len,
+        big_uint_poly_len,
+        moduli_count,
+    );
 
     #[cfg(not(feature = "parallel"))]
     let mut expand_coeff_context = DcrtGlweExpandCoeffContext::new(
@@ -233,6 +238,7 @@ fn party_operation(
         ring_poly_length,
         rns_poly_len,
         big_uint_poly_len,
+        moduli_count,
     );
 
     #[cfg(feature = "parallel")]
@@ -242,6 +248,7 @@ fn party_operation(
         ring_poly_length,
         rns_poly_len,
         big_uint_poly_len,
+        moduli_count,
     );
 
     let inv_two = CommitModulus.reduce_inv(2);
@@ -486,7 +493,12 @@ fn party_operation(
         ) {
             msk_share.phase_a_inplace(&DcrtGlwe(encode_commit), &mut DcrtPolynomial(&mut *crt_dec));
             table.inverse_transform_slice(crt_dec);
-            base_q.compose_multiple_values_inplace(crt_dec, big_uint_dec, ring_poly_length);
+            base_q.compose_multiple_values_inplace(
+                crt_dec,
+                big_uint_dec,
+                ring_poly_length,
+                external_product_context.compose_buffer_mut(),
+            );
         }
 
         for (value, e, r_mod_delta_prime, r_mod_q_prime) in izip!(
@@ -553,7 +565,12 @@ fn party_operation(
         ) {
             msk_share.phase_inplace(&DcrtGlwe(encode_commit), &mut DcrtPolynomial(&mut *crt_dec));
             table.inverse_transform_slice(crt_dec);
-            base_q.compose_multiple_values_inplace(crt_dec, big_uint_dec, ring_poly_length);
+            base_q.compose_multiple_values_inplace(
+                crt_dec,
+                big_uint_dec,
+                ring_poly_length,
+                external_product_context.compose_buffer_mut(),
+            );
         }
 
         for (value, e, r_mod_delta_prime, r_mod_q_prime) in izip!(

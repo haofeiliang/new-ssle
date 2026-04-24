@@ -216,14 +216,19 @@ fn party_operation(
 
     let table = party.table();
 
+    let moduli_count = ring_params.cipher_moduli_count();
     let ring_poly_length = ring_params.poly_length();
     let rns_poly_len = ring_params.rns_poly_len();
     let rns_glwe_len = ring_params.rns_glwe_len();
     let big_uint_poly_len = ring_params.big_uint_poly_len();
     let rns_ggsw_len = ggsw_params.rns_ggsw_len();
 
-    let mut external_product_context =
-        DcrtGlevContext::new(ring_poly_length, rns_poly_len, big_uint_poly_len);
+    let mut external_product_context = DcrtGlevContext::new(
+        ring_poly_length,
+        rns_poly_len,
+        big_uint_poly_len,
+        moduli_count,
+    );
 
     #[cfg(not(feature = "parallel"))]
     let mut expand_coeff_context = DcrtGlweExpandCoeffContext::new(
@@ -231,6 +236,7 @@ fn party_operation(
         ring_poly_length,
         rns_poly_len,
         big_uint_poly_len,
+        moduli_count,
     );
 
     #[cfg(feature = "parallel")]
@@ -240,6 +246,7 @@ fn party_operation(
         ring_poly_length,
         rns_poly_len,
         big_uint_poly_len,
+        moduli_count,
     );
 
     // let mut decrypt_context =
@@ -483,7 +490,12 @@ fn party_operation(
         .chunks_exact(rns_poly_len)
         .zip(big_uint_dec_share.chunks_exact_mut(big_uint_poly_len))
     {
-        rns_base.compose_multiple_values_inplace(x, y, ring_poly_length);
+        rns_base.compose_multiple_values_inplace(
+            x,
+            y,
+            ring_poly_length,
+            external_product_context.compose_buffer_mut(),
+        );
     }
 
     let p = num::BigUint::from(ring_params.plain_modulus_value());
