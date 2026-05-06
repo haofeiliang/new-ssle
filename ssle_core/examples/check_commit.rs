@@ -1,5 +1,5 @@
 // cargo run --release --package ssle_core --example check_commit -- -p 4
-// cargo run --release --package ssle_core --example check_commit --features="gt32" -- -p 64
+// cargo run --release --package ssle_core --example check_commit --features="gt16" -- -p 64
 // cargo run --release --package ssle_core --example check_commit --features="gt128" -- -p 256
 
 use std::sync::Arc;
@@ -16,11 +16,11 @@ use ssle_core::{
     CommitModulus, CommitTable, CommitValueT, KeyGen, MasterPublicKey, SsleParameters,
 };
 
-#[cfg(feature = "gt32")]
-const GT32: bool = true;
+#[cfg(feature = "gt16")]
+const GT16: bool = true;
 
-#[cfg(not(feature = "gt32"))]
-const GT32: bool = false;
+#[cfg(not(feature = "gt16"))]
+const GT16: bool = false;
 
 #[cfg(feature = "gt128")]
 const GT128: bool = true;
@@ -53,18 +53,18 @@ fn check_args(args: Args) -> (usize, SsleParameters) {
         None => 2,
     };
 
-    let params = if party_count <= 32 {
-        if !GT32 && !GT128 {
+    let params = if party_count <= 16 {
+        if !GT16 && !GT128 {
             SsleParameters::new(party_count)
         } else {
-            panic!("Don't enable feature `gt32` and `gt128` for party count: {party_count}<=32!")
+            panic!("Don't enable feature `gt16` and `gt128` for party count: {party_count}<=16!")
         }
     } else if party_count <= 128 {
-        if GT32 && !GT128 {
+        if GT16 && !GT128 {
             SsleParameters::new(party_count)
         } else {
-            if !GT32 {
-                panic!("Enable feature `gt32` for party count: {party_count}!")
+            if !GT16 {
+                panic!("Enable feature `gt16` for party count: {party_count}!")
             } else {
                 panic!("Don't enable feature `gt128` for party count: {party_count}<=128!")
             }
@@ -73,8 +73,8 @@ fn check_args(args: Args) -> (usize, SsleParameters) {
         if GT128 {
             SsleParameters::new(party_count)
         } else {
-            if GT32 {
-                panic!("Don't enable feature `gt32` for party count: {party_count}>128!")
+            if GT16 {
+                panic!("Don't enable feature `gt16` for party count: {party_count}>128!")
             } else {
                 panic!("Enable feature `gt128` for party count: {party_count}!")
             }

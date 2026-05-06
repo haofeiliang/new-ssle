@@ -7,11 +7,11 @@ use primus_rns::RNSBase;
 
 #[derive(Barrett)]
 #[cfg_attr(
-    all(not(feature = "gt128"), not(feature = "gt32")),
+    all(not(feature = "gt128"), not(feature = "gt16")),
     modulus(ty = u32, value = 12289)
 )]
 #[cfg_attr(
-    all(not(feature = "gt128"), feature = "gt32"),
+    all(not(feature = "gt128"), feature = "gt16"),
     modulus(ty = u32, value = 18433)
 )]
 #[cfg_attr(feature = "gt128", modulus(ty = u32, value = 40961))]
@@ -41,8 +41,8 @@ impl SsleParameters {
     pub fn new(party_count: usize) -> Self {
         assert!(party_count.is_power_of_two() && (2..=2048).contains(&party_count));
 
-        let commit_params = if party_count <= 32 {
-            RlweParameters::new(512, 2, CommitModulus, RingSecretKeyType::Ternary, 3.19)
+        let commit_params = if party_count <= 16 {
+            RlweParameters::new(512, 2, CommitModulus, RingSecretKeyType::Ternary, 3.7)
         } else {
             RlweParameters::new(1024, 2, CommitModulus, RingSecretKeyType::Ternary, 0.849)
         };
@@ -59,7 +59,7 @@ impl SsleParameters {
                 4 => BigUintApproxSignedBasis::new(modulus, 23, Some(3), &rns_base),
                 8 => BigUintApproxSignedBasis::new(modulus, 23, Some(3), &rns_base),
                 16 => BigUintApproxSignedBasis::new(modulus, 18, Some(4), &rns_base),
-                32 => BigUintApproxSignedBasis::new(modulus, 18, Some(4), &rns_base),
+                32 => BigUintApproxSignedBasis::new(modulus, 15, Some(5), &rns_base),
                 64 => BigUintApproxSignedBasis::new(modulus, 15, Some(5), &rns_base),
                 128 => BigUintApproxSignedBasis::new(modulus, 13, Some(6), &rns_base),
                 _ => unreachable!(),

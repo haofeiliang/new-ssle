@@ -38,7 +38,7 @@ For more information, see the [Rust installation guide](https://www.rust-lang.or
 Note: AVX512 support requires CPU with AVX512 support
 
 
-### Run our codes with parties count $G$ in [2, 4, 8, 16, 32]
+### Run our codes with parties count $G$ in [2, 4, 8, 16]
 
 ```bash
 cargo run --release --package ssle_core --example ssle_compute_time -- -p 4
@@ -73,10 +73,10 @@ communication size: 2.34375MB
 +-----------------------------+------------+
 ```
 
-### Run our codes with parties count $G$ in [64, 128]
+### Run our codes with parties count $G$ in [32, 64, 128]
 
 ```bash
-cargo run --release --package ssle_core --example ssle_compute_time --features="gt32" -- -p 64
+cargo run --release --package ssle_core --example ssle_compute_time --features="gt16" -- -p 64
 ```
 
 Expected output:
