@@ -19,8 +19,8 @@ echo "Thread counts to test: ${THREADS[*]}"
 
 # 定义三个测试块：基础 feature | example | party count 列表
 blocks=(
-    "|ssle_compute_time|2 4 8 16 32"
-    "gt32|ssle_compute_time|64 128"
+    "|ssle_compute_time|2 4 8 16"
+    "gt16|ssle_compute_time|32 64 128"
     "gt128|ssle_ge_256_compute_time_improve|256 512 1024 2048"
 )
 
