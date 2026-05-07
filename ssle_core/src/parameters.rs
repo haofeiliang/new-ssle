@@ -113,11 +113,11 @@ impl SsleParameters {
             }
         } else {
             let (rns_moduli, std_dev): ([CrtValueT; 3], f64) = if party_count == 256 {
-                ([137438822401, 68719403009, 68719230977], 5.6)
+                ([137438822401, 68719403009, 68719230977], 6.4)
             } else if party_count == 512 || party_count == 1024 {
-                ([137438822401, 137438814209, 68719403009], 11.12)
+                ([137438822401, 137438814209, 68719403009], 12.79)
             } else {
-                ([137438822401, 137438814209, 137438773249], 22.4)
+                ([137438822401, 137438814209, 137438773249], 25.58)
             };
             let moduli = rns_moduli.map(BarrettModulus::new).to_vec();
             let rns_base = RNSBase::new(&moduli).unwrap();
@@ -158,7 +158,7 @@ impl SsleParameters {
 
             let basis = match party_count {
                 256 => BigUintApproxSignedBasis::new(modulus, 21, Some(4), &rns_base),
-                512 => BigUintApproxSignedBasis::new(modulus, 18, Some(5), &rns_base),
+                512 => BigUintApproxSignedBasis::new(modulus, 15, Some(6), &rns_base),
                 1024 => BigUintApproxSignedBasis::new(modulus, 15, Some(6), &rns_base),
                 2048 => BigUintApproxSignedBasis::new(modulus, 15, Some(6), &rns_base),
                 _ => unreachable!(),
