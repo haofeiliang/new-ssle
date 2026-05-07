@@ -117,7 +117,7 @@ impl SsleParameters {
             } else if party_count == 512 || party_count == 1024 {
                 ([137438822401, 137438814209, 68719403009], 12.79)
             } else {
-                ([137438822401, 137438814209, 137438773249], 25.58)
+                ([137438822401, 137438814209, 137438773249], 25.57)
             };
             let moduli = rns_moduli.map(BarrettModulus::new).to_vec();
             let rns_base = RNSBase::new(&moduli).unwrap();
