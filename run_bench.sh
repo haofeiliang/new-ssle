@@ -6,6 +6,8 @@
 
 set -e
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+
 REPEATS=${1:-5}
 THREADS_ARG=${2:-"1"}
 TOOLCHAIN_ARG=${3:-""}
@@ -28,11 +30,34 @@ if [ -n "$TOOLCHAIN_ARG" ]; then
     fi
 fi
 
+cargo_quiet_linker() {
+    local rustflags="${RUSTFLAGS:-}"
+    if [[ "$rustflags" != *linker-messages* && "$rustflags" != *linker_messages* ]]; then
+        rustflags="${rustflags:+$rustflags }-A linker-messages"
+    fi
+
+    if [ "${RUST_LOG+x}" ]; then
+        RUSTFLAGS="$rustflags" RUST_LOG="$RUST_LOG" cargo "$@"
+    else
+        RUSTFLAGS="$rustflags" cargo "$@"
+    fi
+}
+
 OUTPUT_DIR="results"
 mkdir -p "$OUTPUT_DIR"
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+TIMESTAMP=$(date +%Y%m%d_%H%M)
+RESULT_FILE_TAG="$TIMESTAMP"
+if [ ${#CARGO_TOOLCHAIN[@]} -gt 0 ]; then
+    TOOLCHAIN_NAME="${CARGO_TOOLCHAIN[0]#+}"
+    if [[ "$TOOLCHAIN_NAME" == nightly* ]]; then
+        RESULT_FILE_TAG="${TIMESTAMP}_nightly"
+    fi
+fi
 
-echo "Results will be saved to ${OUTPUT_DIR}/benchmark_${TIMESTAMP}_t*.txt"
+echo "Results will be saved to ${OUTPUT_DIR}/${RESULT_FILE_TAG}_t*.txt"
+BUILD_LOG="${OUTPUT_DIR}/build_log.txt"
+: > "$BUILD_LOG"
+echo "Build log will be saved to ${BUILD_LOG}"
 echo "Thread counts to test: ${THREADS[*]}"
 if [ ${#CARGO_TOOLCHAIN[@]} -eq 0 ]; then
     echo "Cargo toolchain: default"
@@ -42,7 +67,7 @@ fi
 
 # 为每个线程数创建输出文件，写入头部
 for t in "${THREADS[@]}"; do
-    OUTFILE="${OUTPUT_DIR}/benchmark_${TIMESTAMP}_t${t}.txt"
+    OUTFILE="${OUTPUT_DIR}/${RESULT_FILE_TAG}_t${t}.txt"
     echo "Results for thread count t=$t" > "$OUTFILE"
     echo "Repeat each test $REPEATS times" >> "$OUTFILE"
     echo "==========================================" >> "$OUTFILE"
@@ -66,7 +91,7 @@ for block in "${blocks[@]}"; do
 
     # 中层循环：遍历所有线程数 t
     for t in "${THREADS[@]}"; do
-        OUTFILE="${OUTPUT_DIR}/benchmark_${TIMESTAMP}_t${t}.txt"
+        OUTFILE="${OUTPUT_DIR}/${RESULT_FILE_TAG}_t${t}.txt"
 
         # 根据 t 确定 features 和命令行参数
         if [ "$t" -eq 1 ]; then
@@ -88,10 +113,10 @@ for block in "${blocks[@]}"; do
         # 检查当前 features 是否与上一次构建的 features 相同
         if [ "$features" != "$last_features" ]; then
             echo "Features changed from '$last_features' to '$features'. Rebuilding..." | tee -a "$OUTFILE"
-            cargo "${CARGO_TOOLCHAIN[@]}" build --quiet --release \
+            cargo_quiet_linker "${CARGO_TOOLCHAIN[@]}" build --quiet --release \
                 --package ssle_core \
                 --example "$example" \
-                --features="$features" >> "$OUTPUT_DIR/build_log.txt"
+                --features="$features" >> "$BUILD_LOG"
             last_features="$features"
             echo "Build completed. Sleeping 2 seconds..." | tee -a "$OUTFILE"
             sleep 2
@@ -106,7 +131,7 @@ for block in "${blocks[@]}"; do
             for ((i=1; i<=REPEATS; i++)); do
                 echo "Run $i for p=$p, t=$t" | tee -a "$OUTFILE"
 
-                RUST_LOG=off cargo "${CARGO_TOOLCHAIN[@]}" run --quiet --release \
+                RUST_LOG=off cargo_quiet_linker "${CARGO_TOOLCHAIN[@]}" run --quiet --release \
                     --package ssle_core \
                     --example "$example" \
                     --features="$features" \
@@ -119,4 +144,18 @@ for block in "${blocks[@]}"; do
     done
 done
 
-echo "Benchmark completed. Results in ${OUTPUT_DIR}/benchmark_${TIMESTAMP}_t*.txt"
+echo "Benchmark completed. Results in ${OUTPUT_DIR}/${RESULT_FILE_TAG}_t*.txt"
+
+ANALYZE_SCRIPT="${SCRIPT_DIR}/analyze_bench.sh"
+if [ ! -f "$ANALYZE_SCRIPT" ]; then
+    echo "Analyze script not found: $ANALYZE_SCRIPT" >&2
+    exit 1
+fi
+
+echo
+echo "Average all_compute time:"
+echo "scheme, party_count, avg_all_compute_ms"
+for t in "${THREADS[@]}"; do
+    OUTFILE="${OUTPUT_DIR}/${RESULT_FILE_TAG}_t${t}.txt"
+    bash "$ANALYZE_SCRIPT" --data-only "$OUTFILE"
+done

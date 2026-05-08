@@ -15,6 +15,7 @@ $Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 [Console]::InputEncoding = $Utf8NoBom
 [Console]::OutputEncoding = $Utf8NoBom
 $OutputEncoding = $Utf8NoBom
+$ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 
 $Threads = $ThreadsArg -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
 
@@ -30,10 +31,16 @@ if ($ToolchainArg.Trim() -ne "") {
 $OutputDir = "results"
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 
-$Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$Timestamp = Get-Date -Format "yyyyMMdd_HHmm"
+$ResultFileTag = $Timestamp
+if ($CargoToolchainArgs.Count -gt 0 -and $CargoToolchainArgs[0].TrimStart("+").StartsWith("nightly")) {
+    $ResultFileTag = "${Timestamp}_nightly"
+}
 $BuildLog = Join-Path $OutputDir "build_log.txt"
+"" | Out-File -FilePath $BuildLog -Encoding utf8
 
-Write-Host "Results will be saved to $OutputDir/benchmark_${Timestamp}_t*.txt"
+Write-Host "Results will be saved to $OutputDir/${ResultFileTag}_t*.txt"
+Write-Host "Build log will be saved to $BuildLog"
 Write-Host "Thread counts to test: $($Threads -join ' ')"
 if ($CargoToolchainArgs.Count -eq 0) {
     Write-Host "Cargo toolchain: default"
@@ -51,9 +58,18 @@ function Write-Log {
     $Message | Tee-Object -FilePath $FilePath -Append
 }
 
+function Enable-QuietLinkerMessages {
+    if ([string]::IsNullOrWhiteSpace($env:RUSTFLAGS)) {
+        $env:RUSTFLAGS = "-A linker-messages"
+    }
+    elseif ($env:RUSTFLAGS -notmatch "linker[-_]messages") {
+        $env:RUSTFLAGS = "$($env:RUSTFLAGS) -A linker-messages"
+    }
+}
+
 # 为每个线程数创建输出文件，写入头部
 foreach ($t in $Threads) {
-    $OutFile = Join-Path $OutputDir "benchmark_${Timestamp}_t${t}.txt"
+    $OutFile = Join-Path $OutputDir "${ResultFileTag}_t${t}.txt"
 
     "Results for thread count t=$t" | Out-File -FilePath $OutFile -Encoding utf8
     "Repeat each test $Repeats times" | Out-File -FilePath $OutFile -Append -Encoding utf8
@@ -91,7 +107,7 @@ foreach ($Block in $Blocks) {
     Write-Host "Processing block: base_features='$BaseFeatures', example='$Example', p in {$PList}"
 
     foreach ($t in $Threads) {
-        $OutFile = Join-Path $OutputDir "benchmark_${Timestamp}_t${t}.txt"
+        $OutFile = Join-Path $OutputDir "${ResultFileTag}_t${t}.txt"
 
         # 根据 t 确定 features 和命令行参数
         if ([int]$t -eq 1) {
@@ -126,9 +142,22 @@ foreach ($Block in $Blocks) {
                 "--features=$Features"
             )
 
-            & cargo @BuildArgs >> $BuildLog
-            if ($LASTEXITCODE -ne 0) {
-                throw "cargo build failed with exit code $LASTEXITCODE"
+            $OldRustFlags = $env:RUSTFLAGS
+            Enable-QuietLinkerMessages
+
+            try {
+                & cargo @BuildArgs >> $BuildLog
+                if ($LASTEXITCODE -ne 0) {
+                    throw "cargo build failed with exit code $LASTEXITCODE"
+                }
+            }
+            finally {
+                if ($null -eq $OldRustFlags) {
+                    Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+                }
+                else {
+                    $env:RUSTFLAGS = $OldRustFlags
+                }
             }
 
             $LastFeatures = $Features
@@ -158,7 +187,9 @@ foreach ($Block in $Blocks) {
                 ) + $TArgs
 
                 $OldRustLog = $env:RUST_LOG
+                $OldRustFlags = $env:RUSTFLAGS
                 $env:RUST_LOG = "off"
+                Enable-QuietLinkerMessages
 
                 try {
                     & cargo @RunArgs |
@@ -175,6 +206,13 @@ foreach ($Block in $Blocks) {
                     else {
                         $env:RUST_LOG = $OldRustLog
                     }
+
+                    if ($null -eq $OldRustFlags) {
+                        Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+                    }
+                    else {
+                        $env:RUSTFLAGS = $OldRustFlags
+                    }
                 }
 
                 "--- End run $i for p=$p, t=$t ---" | Out-File -FilePath $OutFile -Append -Encoding utf8
@@ -184,4 +222,17 @@ foreach ($Block in $Blocks) {
     }
 }
 
-Write-Host "Benchmark completed. Results in $OutputDir/benchmark_${Timestamp}_t*.txt"
+Write-Host "Benchmark completed. Results in $OutputDir/${ResultFileTag}_t*.txt"
+
+$AnalyzeScript = Join-Path $ScriptDir "analyze_bench.ps1"
+if (-not (Test-Path -LiteralPath $AnalyzeScript -PathType Leaf)) {
+    throw "Analyze script not found: $AnalyzeScript"
+}
+
+Write-Host ""
+Write-Host "Average all_compute time:"
+Write-Host "scheme, party_count, avg_all_compute_ms"
+foreach ($t in $Threads) {
+    $OutFile = Join-Path $OutputDir "${ResultFileTag}_t${t}.txt"
+    & $AnalyzeScript $OutFile -DataOnly
+}
