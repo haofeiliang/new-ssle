@@ -1,14 +1,32 @@
 #!/bin/bash
-# 用法: ./run_bench.sh [重复次数] [线程数列表]
+# 用法: ./run_bench.sh [重复次数] [线程数列表] [cargo toolchain]
 # 线程数列表格式：逗号分隔的数字，例如 "1,2,4,8,16"；默认为 "1"（只测单线程）
-# 示例: ./run_bench.sh 5 "1,2,4,8,16,32"
+# cargo toolchain 可选，例如 "+nightly" 或 "nightly"；默认为当前默认 toolchain
+# 示例: ./run_bench.sh 5 "1,2,4,8,16,32" +nightly
 
 set -e
 
 REPEATS=${1:-5}
 THREADS_ARG=${2:-"1"}
+TOOLCHAIN_ARG=${3:-""}
 
-IFS=',' read -ra THREADS <<< "$THREADS_ARG"
+THREADS=()
+IFS=',' read -ra RAW_THREADS <<< "$THREADS_ARG"
+for raw_t in "${RAW_THREADS[@]}"; do
+    t=$(echo "$raw_t" | xargs)
+    if [ -n "$t" ]; then
+        THREADS+=("$t")
+    fi
+done
+
+CARGO_TOOLCHAIN=()
+if [ -n "$TOOLCHAIN_ARG" ]; then
+    if [[ "$TOOLCHAIN_ARG" == +* ]]; then
+        CARGO_TOOLCHAIN=("$TOOLCHAIN_ARG")
+    else
+        CARGO_TOOLCHAIN=("+$TOOLCHAIN_ARG")
+    fi
+fi
 
 OUTPUT_DIR="results"
 mkdir -p "$OUTPUT_DIR"
@@ -16,6 +34,11 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
 echo "Results will be saved to ${OUTPUT_DIR}/benchmark_${TIMESTAMP}_t*.txt"
 echo "Thread counts to test: ${THREADS[*]}"
+if [ ${#CARGO_TOOLCHAIN[@]} -eq 0 ]; then
+    echo "Cargo toolchain: default"
+else
+    echo "Cargo toolchain: ${CARGO_TOOLCHAIN[0]}"
+fi
 
 # 为每个线程数创建输出文件，写入头部
 for t in "${THREADS[@]}"; do
@@ -65,10 +88,10 @@ for block in "${blocks[@]}"; do
         # 检查当前 features 是否与上一次构建的 features 相同
         if [ "$features" != "$last_features" ]; then
             echo "Features changed from '$last_features' to '$features'. Rebuilding..." | tee -a "$OUTFILE"
-            cargo build --release \
+            cargo "${CARGO_TOOLCHAIN[@]}" build --quiet --release \
                 --package ssle_core \
                 --example "$example" \
-                --features="$features" >> "$OUTPUT_DIR/build_log.txt" 2>&1
+                --features="$features" >> "$OUTPUT_DIR/build_log.txt"
             last_features="$features"
             echo "Build completed. Sleeping 2 seconds..." | tee -a "$OUTFILE"
             sleep 2
@@ -83,11 +106,11 @@ for block in "${blocks[@]}"; do
             for ((i=1; i<=REPEATS; i++)); do
                 echo "Run $i for p=$p, t=$t" | tee -a "$OUTFILE"
 
-                RUST_LOG=off cargo run --release \
+                RUST_LOG=off cargo "${CARGO_TOOLCHAIN[@]}" run --quiet --release \
                     --package ssle_core \
                     --example "$example" \
                     --features="$features" \
-                    -- -p "$p" $t_args >> "$OUTFILE" 2>&1
+                    -- -p "$p" $t_args >> "$OUTFILE"
 
                 echo "--- End run $i for p=$p, t=$t ---" >> "$OUTFILE"
                 sleep 1   # 短暂休息，避免资源争用
