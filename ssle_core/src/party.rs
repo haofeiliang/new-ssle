@@ -9,7 +9,7 @@ use primus_factor::ShoupFactor;
 use primus_fhe_core::{NttRlwePublicKey, NttRlweSecretKey};
 use primus_integer::{AsInto, DataMut, RawData, UnsignedInteger};
 use primus_lattice::{ggsw::DcrtGgsw, glwe::CrtGlwe};
-use primus_reduce::{Modulus, ops::ReduceInv};
+use primus_reduce::{Modulus, ReduceInv};
 use tokio::runtime::Runtime;
 
 use crate::{CommitModulus, CommitTable, CommitValueT, CrtValueT, MasterPublicKey, SsleParameters};

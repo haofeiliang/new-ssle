@@ -128,6 +128,11 @@ foreach ($Block in $Blocks) {
         # 去除多余空格
         $Features = ($Features -split "\s+" | Where-Object { $_ -ne "" }) -join " "
 
+        if ($CargoToolchainArgs.Count -gt 0 -and $CargoToolchainArgs[0].TrimStart("+").StartsWith("nightly")) {
+            $Features = ($Features + " simd") -split "\s+" | Where-Object { $_ -ne "" } | Select-Object -Unique
+            $Features = ($Features -join " ")
+        }
+
         Write-Log "--- Thread t=$t, features: '$Features' ---" $OutFile
 
         if ($Features -ne $LastFeatures) {

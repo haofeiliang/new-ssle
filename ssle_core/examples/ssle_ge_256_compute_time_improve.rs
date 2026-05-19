@@ -21,7 +21,7 @@ use primus_lattice::{
 use primus_ntt::{DcrtTable, NttTable};
 use primus_poly::{ArrayBase, DcrtPolynomial, Polynomial, PolynomialOwned};
 use primus_reduce::Modulus;
-use primus_reduce::ops::ReduceInv;
+use primus_reduce::ReduceInv;
 use rand::{RngExt, distr::Uniform};
 use ssle_core::{
     CoefficientExpansionKey, CommitModulus, CommitTable, CommitValueT, CrtValueT, KeyGen,

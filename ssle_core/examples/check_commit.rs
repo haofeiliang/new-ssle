@@ -10,7 +10,7 @@ use network::netio::Participant;
 use primus_integer::AsInto;
 use primus_lattice::rlwe::NttRlwe;
 use primus_ntt::NttTable;
-use primus_reduce::ops::*;
+use primus_reduce::ReduceInv;
 use rand::RngExt;
 use ssle_core::{
     CommitModulus, CommitTable, CommitValueT, KeyGen, MasterPublicKey, SsleParameters,

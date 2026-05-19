@@ -9,7 +9,7 @@ use primus_lattice::{
 };
 use primus_ntt::{DcrtTable, NttTable};
 use primus_poly::{ArrayBase, CrtPolynomial, DcrtPolynomial, Polynomial, PolynomialOwned};
-use primus_reduce::{Modulus, ops::*};
+use primus_reduce::{Modulus, ReduceInv};
 use rand::RngExt;
 use ssle_core::{CommitModulus, CommitTable, CommitValueT, CrtValueT, KeyGen, SsleParameters};
 

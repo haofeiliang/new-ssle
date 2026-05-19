@@ -108,6 +108,15 @@ for block in "${blocks[@]}"; do
         # 去除多余空格，使 features 字符串干净
         features=$(echo "$features" | xargs)
 
+        # If using nightly toolchain, enable simd feature
+        if [ ${#CARGO_TOOLCHAIN[@]} -gt 0 ]; then
+            TOOLCHAIN_NAME="${CARGO_TOOLCHAIN[0]#+}"
+            if [[ "$TOOLCHAIN_NAME" == nightly* ]]; then
+                features="${features} simd"
+                features=$(echo "$features" | xargs)
+            fi
+        fi
+
         echo "--- Thread t=$t, features: '$features' ---" | tee -a "$OUTFILE"
 
         # 检查当前 features 是否与上一次构建的 features 相同
