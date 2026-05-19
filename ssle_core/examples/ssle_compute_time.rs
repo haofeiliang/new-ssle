@@ -751,8 +751,7 @@ fn party_operation(
     };
 
     let size1 = (all_rotate_ggsw[0].byte_count() * (party_count - 1)) as f64 * factor / 1024.0;
-    let size2 =
-        primus_integer::size::Size::byte_count(&all_encode_commits) as f64 * factor / 1024.0;
+    let size2 = primus_integer::Size::byte_count(&all_encode_commits) as f64 * factor / 1024.0;
 
     let single_size1 = (all_rotate_ggsw[0].byte_count()) as f64 * factor / 1024.0;
     let single_size2 = size2 / party_count as f64;
