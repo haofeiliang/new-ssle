@@ -1,12 +1,15 @@
-# 用法: .\run_bench.ps1 [重复次数] [线程数列表] [cargo toolchain]
+# 用法: .\run_bench.ps1 [重复次数] [线程数列表] [cargo toolchain] [-Simd]
 # 线程数列表格式：逗号分隔的数字，例如 "1,2,4,8,16"；默认为 "1"（只测单线程）
 # cargo toolchain 可选，例如 "+nightly" 或 "nightly"；默认为当前默认 toolchain
+# -Simd 可选；只有显式传入时才启用 simd feature
 # 示例: .\run_bench.ps1 5 "1,2,4,8,16,32" +nightly
+# 示例: .\run_bench.ps1 5 "1,2,4,8,16,32" +nightly -Simd
 
 param(
     [int]$Repeats = 5,
     [string]$ThreadsArg = "1",
-    [string]$ToolchainArg = ""
+    [string]$ToolchainArg = "",
+    [switch]$Simd
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,6 +39,9 @@ $ResultFileTag = $Timestamp
 if ($CargoToolchainArgs.Count -gt 0 -and $CargoToolchainArgs[0].TrimStart("+").StartsWith("nightly")) {
     $ResultFileTag = "${Timestamp}_nightly"
 }
+if ($Simd) {
+    $ResultFileTag = "${ResultFileTag}_simd"
+}
 $BuildLog = Join-Path $OutputDir "build_log.txt"
 "" | Out-File -FilePath $BuildLog -Encoding utf8
 
@@ -48,6 +54,7 @@ if ($CargoToolchainArgs.Count -eq 0) {
 else {
     Write-Host "Cargo toolchain: $($CargoToolchainArgs[0])"
 }
+Write-Host "SIMD feature: $([bool]$Simd)"
 
 function Write-Log {
     param(
@@ -58,11 +65,15 @@ function Write-Log {
     $Message | Tee-Object -FilePath $FilePath -Append
 }
 
-function Enable-QuietLinkerMessages {
+function Enable-BenchRustFlags {
     if ([string]::IsNullOrWhiteSpace($env:RUSTFLAGS)) {
-        $env:RUSTFLAGS = "-A linker-messages"
+        $env:RUSTFLAGS = "-C target-cpu=native -A linker-messages"
     }
-    elseif ($env:RUSTFLAGS -notmatch "linker[-_]messages") {
+    elseif ($env:RUSTFLAGS -notmatch "target[-_]cpu") {
+        $env:RUSTFLAGS = "$($env:RUSTFLAGS) -C target-cpu=native"
+    }
+
+    if ($env:RUSTFLAGS -notmatch "linker[-_]messages") {
         $env:RUSTFLAGS = "$($env:RUSTFLAGS) -A linker-messages"
     }
 }
@@ -128,7 +139,7 @@ foreach ($Block in $Blocks) {
         # 去除多余空格
         $Features = ($Features -split "\s+" | Where-Object { $_ -ne "" }) -join " "
 
-        if ($CargoToolchainArgs.Count -gt 0 -and $CargoToolchainArgs[0].TrimStart("+").StartsWith("nightly")) {
+        if ($Simd) {
             $Features = ($Features + " simd") -split "\s+" | Where-Object { $_ -ne "" } | Select-Object -Unique
             $Features = ($Features -join " ")
         }
@@ -148,7 +159,7 @@ foreach ($Block in $Blocks) {
             )
 
             $OldRustFlags = $env:RUSTFLAGS
-            Enable-QuietLinkerMessages
+            Enable-BenchRustFlags
 
             try {
                 & cargo @BuildArgs >> $BuildLog
@@ -194,7 +205,7 @@ foreach ($Block in $Blocks) {
                 $OldRustLog = $env:RUST_LOG
                 $OldRustFlags = $env:RUSTFLAGS
                 $env:RUST_LOG = "off"
-                Enable-QuietLinkerMessages
+                Enable-BenchRustFlags
 
                 try {
                     & cargo @RunArgs |

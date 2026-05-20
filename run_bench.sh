@@ -1,8 +1,10 @@
 #!/bin/bash
-# 用法: ./run_bench.sh [重复次数] [线程数列表] [cargo toolchain]
+# 用法: ./run_bench.sh [重复次数] [线程数列表] [cargo toolchain] [-Simd]
 # 线程数列表格式：逗号分隔的数字，例如 "1,2,4,8,16"；默认为 "1"（只测单线程）
 # cargo toolchain 可选，例如 "+nightly" 或 "nightly"；默认为当前默认 toolchain
+# -Simd 可选；只有显式传入时才启用 simd feature
 # 示例: ./run_bench.sh 5 "1,2,4,8,16,32" +nightly
+# 示例: ./run_bench.sh 5 "1,2,4,8,16,32" +nightly -Simd
 
 set -e
 
@@ -10,7 +12,28 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
 REPEATS=${1:-5}
 THREADS_ARG=${2:-"1"}
-TOOLCHAIN_ARG=${3:-""}
+TOOLCHAIN_ARG=""
+SIMD=false
+
+if [ "$#" -ge 3 ]; then
+    for arg in "${@:3}"; do
+        case "$arg" in
+            -Simd|--simd)
+                SIMD=true
+                ;;
+            "")
+                ;;
+            *)
+                if [ -z "$TOOLCHAIN_ARG" ]; then
+                    TOOLCHAIN_ARG="$arg"
+                else
+                    echo "Unknown argument: $arg" >&2
+                    exit 1
+                fi
+                ;;
+        esac
+    done
+fi
 
 THREADS=()
 IFS=',' read -ra RAW_THREADS <<< "$THREADS_ARG"
@@ -30,8 +53,13 @@ if [ -n "$TOOLCHAIN_ARG" ]; then
     fi
 fi
 
-cargo_quiet_linker() {
+cargo_bench_flags() {
     local rustflags="${RUSTFLAGS:-}"
+
+    if [[ "$rustflags" != *target-cpu* && "$rustflags" != *target_cpu* ]]; then
+        rustflags="${rustflags:+$rustflags }-C target-cpu=native"
+    fi
+
     if [[ "$rustflags" != *linker-messages* && "$rustflags" != *linker_messages* ]]; then
         rustflags="${rustflags:+$rustflags }-A linker-messages"
     fi
@@ -53,6 +81,9 @@ if [ ${#CARGO_TOOLCHAIN[@]} -gt 0 ]; then
         RESULT_FILE_TAG="${TIMESTAMP}_nightly"
     fi
 fi
+if [ "$SIMD" = true ]; then
+    RESULT_FILE_TAG="${RESULT_FILE_TAG}_simd"
+fi
 
 echo "Results will be saved to ${OUTPUT_DIR}/${RESULT_FILE_TAG}_t*.txt"
 BUILD_LOG="${OUTPUT_DIR}/build_log.txt"
@@ -64,6 +95,7 @@ if [ ${#CARGO_TOOLCHAIN[@]} -eq 0 ]; then
 else
     echo "Cargo toolchain: ${CARGO_TOOLCHAIN[0]}"
 fi
+echo "SIMD feature: $SIMD"
 
 # 为每个线程数创建输出文件，写入头部
 for t in "${THREADS[@]}"; do
@@ -108,13 +140,9 @@ for block in "${blocks[@]}"; do
         # 去除多余空格，使 features 字符串干净
         features=$(echo "$features" | xargs)
 
-        # If using nightly toolchain, enable simd feature
-        if [ ${#CARGO_TOOLCHAIN[@]} -gt 0 ]; then
-            TOOLCHAIN_NAME="${CARGO_TOOLCHAIN[0]#+}"
-            if [[ "$TOOLCHAIN_NAME" == nightly* ]]; then
-                features="${features} simd"
-                features=$(echo "$features" | xargs)
-            fi
+        if [ "$SIMD" = true ]; then
+            features="${features} simd"
+            features=$(echo "$features" | xargs)
         fi
 
         echo "--- Thread t=$t, features: '$features' ---" | tee -a "$OUTFILE"
@@ -122,7 +150,7 @@ for block in "${blocks[@]}"; do
         # 检查当前 features 是否与上一次构建的 features 相同
         if [ "$features" != "$last_features" ]; then
             echo "Features changed from '$last_features' to '$features'. Rebuilding..." | tee -a "$OUTFILE"
-            cargo_quiet_linker "${CARGO_TOOLCHAIN[@]}" build --quiet --release \
+            cargo_bench_flags "${CARGO_TOOLCHAIN[@]}" build --quiet --release \
                 --package ssle_core \
                 --example "$example" \
                 --features="$features" >> "$BUILD_LOG"
@@ -140,7 +168,7 @@ for block in "${blocks[@]}"; do
             for ((i=1; i<=REPEATS; i++)); do
                 echo "Run $i for p=$p, t=$t" | tee -a "$OUTFILE"
 
-                RUST_LOG=off cargo_quiet_linker "${CARGO_TOOLCHAIN[@]}" run --quiet --release \
+                RUST_LOG=off cargo_bench_flags "${CARGO_TOOLCHAIN[@]}" run --quiet --release \
                     --package ssle_core \
                     --example "$example" \
                     --features="$features" \
