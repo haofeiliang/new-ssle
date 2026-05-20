@@ -6,7 +6,7 @@
 # 示例: ./run_bench.sh 5 "1,2,4,8,16,32" +nightly
 # 示例: ./run_bench.sh 5 "1,2,4,8,16,32" +nightly -Simd
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
