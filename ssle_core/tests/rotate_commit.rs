@@ -179,12 +179,12 @@ fn test_rotate_commit() {
             });
 
         let alpha_msgs = commit_sk.decrypt(
-            &NttRlwe::new(final_alpha_commit.as_ref()),
+            &NttRlwe::new(final_alpha_commit.as_slice()),
             commit_params,
             &commit_ntt_table,
         );
         let beta_msgs = commit_sk.decrypt(
-            &NttRlwe::new(final_beta_commit.as_ref()),
+            &NttRlwe::new(final_beta_commit.as_slice()),
             commit_params,
             &commit_ntt_table,
         );
@@ -192,12 +192,12 @@ fn test_rotate_commit() {
         assert!(alpha_msgs.is_zero() || beta_msgs.is_zero(), "r: {r}");
 
         let alpha_msgs = commit_sk_2.decrypt(
-            &NttRlwe::new(final_alpha_commit.as_ref()),
+            &NttRlwe::new(final_alpha_commit.as_slice()),
             commit_params,
             &commit_ntt_table,
         );
         let beta_msgs = commit_sk_2.decrypt(
-            &NttRlwe::new(final_beta_commit.as_ref()),
+            &NttRlwe::new(final_beta_commit.as_slice()),
             commit_params,
             &commit_ntt_table,
         );
@@ -401,7 +401,7 @@ fn test_rotate_commit2() {
             });
 
         let msgs = commit_sk.decrypt(
-            &NttRlwe::new(final_commit.as_ref()),
+            &NttRlwe::new(final_commit.as_slice()),
             commit_params,
             &commit_ntt_table,
         );
@@ -409,7 +409,7 @@ fn test_rotate_commit2() {
         assert!(msgs.is_zero(), "r: {r}");
 
         let msgs = commit_sk_2.decrypt(
-            &NttRlwe::new(final_commit.as_ref()),
+            &NttRlwe::new(final_commit.as_slice()),
             commit_params,
             &commit_ntt_table,
         );

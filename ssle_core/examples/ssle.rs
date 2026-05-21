@@ -17,20 +17,22 @@ use primus_fhe_core::DcrtGlweExpandCoeffContext;
 #[cfg(feature = "parallel")]
 use primus_fhe_core::DcrtGlweExpandCoeffSyncPool;
 use primus_fhe_core::NttRlwePublicKey;
-use primus_integer::{AsInto, BigUint, DataMut};
+use primus_integer::{AsInto, BigUint, DataMut, DivRem};
 use primus_lattice::{
     context::DcrtGlevContext,
     ggsw::DcrtGgsw,
     glwe::{CrtGlwe, DcrtGlwe},
     rlwe::{NttRlwe, Rlwe, RlweOwned},
 };
+use primus_modulus::BarrettModulus;
 use primus_ntt::{DcrtTable, NttTable};
 use primus_poly::{ArrayBase, DcrtPolynomial, Polynomial, PolynomialOwned};
 use primus_reduce::Modulus;
 use rand::RngExt;
 use ssle_core::{
     CoefficientExpansionKey, CommitModulus, CommitTable, CommitValueT, CrtValueT, KeyGen,
-    MasterPublicKey, MasterSecretKeyShare, Party, SsleParameters, generate_dd_random,
+    MasterPublicKey, MasterSecretKeyShare, Party, SsleParameters, biguint_to_u128,
+    generate_dd_random, scale_round_and_mod,
 };
 use tracing::{Level, debug, error, info};
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -511,37 +513,52 @@ fn party_operation(
     let delta_prime: primus_integer::BigUint<Vec<CrtValueT>> =
         primus_integer::BigUint(delta_prime_big.iter_u64_digits().collect());
 
+    let fast_q = biguint_to_u128(&q_big);
+    let fast_qp = biguint_to_u128(&q_prime_big);
+    let fast_dp = biguint_to_u128(&delta_prime_big).map(BarrettModulus::new);
+
     let mut e_shares: Vec<CrtValueT> = vec![0; big_uint_poly_len * 2];
     let mut all_e_shares: Vec<CrtValueT> = vec![0; big_uint_poly_len * 2 * party_count];
 
-    for (value, e, r) in izip!(
-        big_uint_dec_share.chunks_exact_mut(big_uint_value_len),
-        e_shares.chunks_exact_mut(big_uint_value_len),
-        r_mod_delta_prime_share.chunks_exact(big_uint_value_len),
-    ) {
-        let mut temp = num::BigUint::from_slice(bytemuck::cast_slice(value));
-
-        temp *= &q_prime_big;
-
-        let (mut temp, rem) = temp.div_rem(&q_big);
-        if rem * 2u8 >= q_big {
-            temp += 1u8;
+    if let (Some(q128), Some(qp128), Some(dp128)) = (fast_q, fast_qp, fast_dp) {
+        for (value, e, r) in izip!(
+            big_uint_dec_share.as_chunks_mut::<2>().0.iter_mut(),
+            e_shares.as_chunks_mut::<2>().0.iter_mut(),
+            r_mod_delta_prime_share.as_chunks::<2>().0.iter(),
+        ) {
+            scale_round_and_mod(value, e, q128, qp128, dp128);
+            primus_integer::BigUint(e).add_modulo_assign(&primus_integer::BigUint(r), &delta_prime);
         }
+    } else {
+        for (value, e, r) in izip!(
+            big_uint_dec_share.chunks_exact_mut(big_uint_value_len),
+            e_shares.chunks_exact_mut(big_uint_value_len),
+            r_mod_delta_prime_share.chunks_exact(big_uint_value_len),
+        ) {
+            let mut temp = num::BigUint::from_slice(bytemuck::cast_slice(value));
 
-        value.fill(0);
+            temp *= &q_prime_big;
 
-        value
-            .iter_mut()
-            .zip(temp.iter_u64_digits())
-            .for_each(|(x, y)| *x = y);
+            let (mut temp, rem) = temp.div_rem(&q_big);
+            if rem * 2u8 >= q_big {
+                temp += 1u8;
+            }
 
-        temp %= &delta_prime_big;
+            value.fill(0);
 
-        e.iter_mut()
-            .zip(temp.iter_u64_digits())
-            .for_each(|(x, y)| *x = y);
+            value
+                .iter_mut()
+                .zip(temp.iter_u64_digits())
+                .for_each(|(x, y)| *x = y);
 
-        primus_integer::BigUint(e).add_modulo_assign(&primus_integer::BigUint(r), &delta_prime);
+            temp %= &delta_prime_big;
+
+            e.iter_mut()
+                .zip(temp.iter_u64_digits())
+                .for_each(|(x, y)| *x = y);
+
+            primus_integer::BigUint(e).add_modulo_assign(&primus_integer::BigUint(r), &delta_prime);
+        }
     }
 
     if party_id == 0 {
@@ -607,16 +624,28 @@ fn party_operation(
 
     let mut final_commit: Vec<CommitValueT> = vec![0; ring_poly_length * 2];
 
-    for (a, b) in final_commit
-        .iter_mut()
-        .zip(big_uint_dec_share.chunks_exact(big_uint_value_len))
-    {
-        let b = num::BigUint::from_slice(bytemuck::cast_slice(b));
-        let (mut b, rem) = b.div_rem(&delta_prime_big);
-        if rem * 2u8 >= delta_prime_big {
-            b += 1u8;
+    if let Some(dp128) = fast_dp {
+        let dp = dp128.value_unchecked();
+        for (a, b) in final_commit
+            .iter_mut()
+            .zip(big_uint_dec_share.as_chunks::<2>().0.iter())
+        {
+            let b_val = b[0] as u128 | ((b[1] as u128) << 64);
+            let (b_q, rem) = b_val.div_rem(dp);
+            *a = if rem * 2 >= dp { b_q + 1 } else { b_q } as CommitValueT;
         }
-        *a = b.iter_u32_digits().next().unwrap_or(0);
+    } else {
+        for (a, b) in final_commit
+            .iter_mut()
+            .zip(big_uint_dec_share.chunks_exact(big_uint_value_len))
+        {
+            let b = num::BigUint::from_slice(bytemuck::cast_slice(b));
+            let (mut b, rem) = b.div_rem(&delta_prime_big);
+            if rem * 2u8 >= delta_prime_big {
+                b += 1u8;
+            }
+            *a = b.iter_u32_digits().next().unwrap_or(0);
+        }
     }
 
     if party_id == 0 {

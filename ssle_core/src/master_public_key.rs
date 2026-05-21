@@ -103,7 +103,7 @@ impl MasterPublicKey {
         let commit_params = self.commit_params();
 
         let commit_sk = RlweSecretKey::generate(commit_params, rng);
-        let commit_sk = NttRlweSecretKey::from_coeff_secret_key(&commit_sk, ntt_table);
+        let commit_sk = NttRlweSecretKey::from_coeff_secret_key_owned(commit_sk, ntt_table);
         let commit_pk = NttRlwePublicKey::new(&commit_sk, commit_params, ntt_table, rng);
 
         (commit_sk, commit_pk)

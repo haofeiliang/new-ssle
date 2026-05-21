@@ -15,13 +15,14 @@ use primus_factor::ShoupFactor;
 use primus_fhe_core::DcrtGlweExpandCoeffContext;
 #[cfg(feature = "parallel")]
 use primus_fhe_core::DcrtGlweExpandCoeffSyncPool;
-use primus_integer::AsInto;
+use primus_integer::{AsInto, DivRem};
 use primus_lattice::{
     context::DcrtGlevContext,
     ggsw::DcrtGgsw,
     glwe::{CrtGlwe, DcrtGlwe},
     rlwe::{NttRlwe, Rlwe, RlweOwned},
 };
+use primus_modulus::BarrettModulus;
 use primus_ntt::{DcrtTable, NttTable};
 use primus_poly::{ArrayBase, DcrtPolynomial, Polynomial, PolynomialOwned};
 use primus_reduce::Modulus;
@@ -29,7 +30,8 @@ use primus_reduce::ReduceInv;
 use rand::{RngExt, distr::Uniform};
 use ssle_core::{
     CoefficientExpansionKey, CommitModulus, CommitTable, CommitValueT, CrtValueT, KeyGen,
-    MasterPublicKey, MasterSecretKey, MasterSecretKeyShare, SsleParameters, generate_dd_random,
+    MasterPublicKey, MasterSecretKey, MasterSecretKeyShare, SsleParameters, biguint_to_u128,
+    generate_dd_random, scale_round_and_mod,
 };
 use tabled::{Table, Tabled, settings::Rotate};
 use tracing::{debug, error, info, level_filters::LevelFilter};
@@ -341,6 +343,10 @@ fn party_operation(
     let mut delta_prime_half = delta_prime.clone();
     delta_prime_half.right_shift_assign(1);
 
+    let fast_q = biguint_to_u128(&q_big);
+    let fast_qp = biguint_to_u128(&q_prime_big);
+    let fast_dp = biguint_to_u128(&delta_prime_big).map(BarrettModulus::new);
+
     all_encode_commits
         .chunks_exact_mut(rns_glwe_len)
         .skip(2)
@@ -501,39 +507,54 @@ fn party_operation(
             );
         }
 
-        for (value, e, r_mod_delta_prime, r_mod_q_prime) in izip!(
-            big_uint_dec_share.chunks_exact_mut(big_uint_value_len),
-            e_share.chunks_exact_mut(big_uint_value_len),
-            r_mod_delta_prime_share.chunks_exact(big_uint_value_len),
-            r_mod_q_prime_share.chunks_exact(big_uint_value_len),
-        ) {
-            let mut temp = num::BigUint::from_slice(bytemuck::cast_slice(value));
-
-            temp *= &q_prime_big;
-
-            let (mut temp, rem) = temp.div_rem(&q_big);
-            if rem * 2u8 >= q_big {
-                temp += 1u8;
+        if let (Some(q128), Some(qp128), Some(dp128)) = (fast_q, fast_qp, fast_dp) {
+            for (value, e, r_mod_delta_prime, r_mod_q_prime) in izip!(
+                big_uint_dec_share.as_chunks_mut::<2>().0.iter_mut(),
+                e_share.as_chunks_mut::<2>().0.iter_mut(),
+                r_mod_delta_prime_share.as_chunks::<2>().0.iter(),
+                r_mod_q_prime_share.as_chunks::<2>().0.iter(),
+            ) {
+                scale_round_and_mod(value, e, q128, qp128, dp128);
+                primus_integer::BigUint(e)
+                    .add_modulo_assign(&primus_integer::BigUint(r_mod_delta_prime), &delta_prime);
+                primus_integer::BigUint(value)
+                    .add_modulo_assign(&primus_integer::BigUint(r_mod_q_prime), &q_prime);
             }
+        } else {
+            for (value, e, r_mod_delta_prime, r_mod_q_prime) in izip!(
+                big_uint_dec_share.chunks_exact_mut(big_uint_value_len),
+                e_share.chunks_exact_mut(big_uint_value_len),
+                r_mod_delta_prime_share.chunks_exact(big_uint_value_len),
+                r_mod_q_prime_share.chunks_exact(big_uint_value_len),
+            ) {
+                let mut temp = num::BigUint::from_slice(bytemuck::cast_slice(value));
 
-            value.fill(0);
+                temp *= &q_prime_big;
 
-            value
-                .iter_mut()
-                .zip(temp.iter_u64_digits())
-                .for_each(|(x, y)| *x = y);
+                let (mut temp, rem) = temp.div_rem(&q_big);
+                if rem * 2u8 >= q_big {
+                    temp += 1u8;
+                }
 
-            temp %= &delta_prime_big;
+                value.fill(0);
 
-            e.iter_mut()
-                .zip(temp.iter_u64_digits())
-                .for_each(|(x, y)| *x = y);
+                value
+                    .iter_mut()
+                    .zip(temp.iter_u64_digits())
+                    .for_each(|(x, y)| *x = y);
 
-            primus_integer::BigUint(e)
-                .add_modulo_assign(&primus_integer::BigUint(r_mod_delta_prime), &delta_prime);
+                temp %= &delta_prime_big;
 
-            primus_integer::BigUint(value)
-                .add_modulo_assign(&primus_integer::BigUint(r_mod_q_prime), &q_prime);
+                e.iter_mut()
+                    .zip(temp.iter_u64_digits())
+                    .for_each(|(x, y)| *x = y);
+
+                primus_integer::BigUint(e)
+                    .add_modulo_assign(&primus_integer::BigUint(r_mod_delta_prime), &delta_prime);
+
+                primus_integer::BigUint(value)
+                    .add_modulo_assign(&primus_integer::BigUint(r_mod_q_prime), &q_prime);
+            }
         }
     }
 
@@ -573,39 +594,54 @@ fn party_operation(
             );
         }
 
-        for (value, e, r_mod_delta_prime, r_mod_q_prime) in izip!(
-            big_uint_dec_share.chunks_exact_mut(big_uint_value_len),
-            e_share.chunks_exact_mut(big_uint_value_len),
-            r_mod_delta_prime_share.chunks_exact(big_uint_value_len),
-            r_mod_q_prime_share.chunks_exact(big_uint_value_len),
-        ) {
-            let mut temp = num::BigUint::from_slice(bytemuck::cast_slice(value));
-
-            temp *= &q_prime_big;
-
-            let (mut temp, rem) = temp.div_rem(&q_big);
-            if rem * 2u8 >= q_big {
-                temp += 1u8;
+        if let (Some(q128), Some(qp128), Some(dp128)) = (fast_q, fast_qp, fast_dp) {
+            for (value, e, r_mod_delta_prime, r_mod_q_prime) in izip!(
+                big_uint_dec_share.as_chunks_mut::<2>().0.iter_mut(),
+                e_share.as_chunks_mut::<2>().0.iter_mut(),
+                r_mod_delta_prime_share.as_chunks::<2>().0.iter(),
+                r_mod_q_prime_share.as_chunks::<2>().0.iter(),
+            ) {
+                scale_round_and_mod(value, e, q128, qp128, dp128);
+                primus_integer::BigUint(e)
+                    .add_modulo_assign(&primus_integer::BigUint(r_mod_delta_prime), &delta_prime);
+                primus_integer::BigUint(value)
+                    .add_modulo_assign(&primus_integer::BigUint(r_mod_q_prime), &q_prime);
             }
+        } else {
+            for (value, e, r_mod_delta_prime, r_mod_q_prime) in izip!(
+                big_uint_dec_share.chunks_exact_mut(big_uint_value_len),
+                e_share.chunks_exact_mut(big_uint_value_len),
+                r_mod_delta_prime_share.chunks_exact(big_uint_value_len),
+                r_mod_q_prime_share.chunks_exact(big_uint_value_len),
+            ) {
+                let mut temp = num::BigUint::from_slice(bytemuck::cast_slice(value));
 
-            value.fill(0);
+                temp *= &q_prime_big;
 
-            value
-                .iter_mut()
-                .zip(temp.iter_u64_digits())
-                .for_each(|(x, y)| *x = y);
+                let (mut temp, rem) = temp.div_rem(&q_big);
+                if rem * 2u8 >= q_big {
+                    temp += 1u8;
+                }
 
-            temp %= &delta_prime_big;
+                value.fill(0);
 
-            e.iter_mut()
-                .zip(temp.iter_u64_digits())
-                .for_each(|(x, y)| *x = y);
+                value
+                    .iter_mut()
+                    .zip(temp.iter_u64_digits())
+                    .for_each(|(x, y)| *x = y);
 
-            primus_integer::BigUint(e)
-                .add_modulo_assign(&primus_integer::BigUint(r_mod_delta_prime), &delta_prime);
+                temp %= &delta_prime_big;
 
-            primus_integer::BigUint(value)
-                .add_modulo_assign(&primus_integer::BigUint(r_mod_q_prime), &q_prime);
+                e.iter_mut()
+                    .zip(temp.iter_u64_digits())
+                    .for_each(|(x, y)| *x = y);
+
+                primus_integer::BigUint(e)
+                    .add_modulo_assign(&primus_integer::BigUint(r_mod_delta_prime), &delta_prime);
+
+                primus_integer::BigUint(value)
+                    .add_modulo_assign(&primus_integer::BigUint(r_mod_q_prime), &q_prime);
+            }
         }
     }
 
@@ -648,16 +684,28 @@ fn party_operation(
         }
     }
 
-    for (a, b) in final_commit
-        .iter_mut()
-        .zip(p0_big_uint_dec_share.chunks_exact(big_uint_value_len))
-    {
-        let b = num::BigUint::from_slice(bytemuck::cast_slice(b));
-        let (mut b, rem) = b.div_rem(&delta_prime_big);
-        if rem * 2u8 >= delta_prime_big {
-            b += 1u8;
+    if let Some(dp128) = fast_dp {
+        let dp = dp128.value_unchecked();
+        for (a, b) in final_commit
+            .iter_mut()
+            .zip(p0_big_uint_dec_share.as_chunks::<2>().0.iter())
+        {
+            let b_val = b[0] as u128 | ((b[1] as u128) << 64);
+            let (b_q, rem) = b_val.div_rem(dp);
+            *a = if rem * 2 >= dp { b_q + 1 } else { b_q } as CommitValueT;
         }
-        *a = b.iter_u32_digits().next().unwrap_or(0);
+    } else {
+        for (a, b) in final_commit
+            .iter_mut()
+            .zip(p0_big_uint_dec_share.chunks_exact(big_uint_value_len))
+        {
+            let b = num::BigUint::from_slice(bytemuck::cast_slice(b));
+            let (mut b, rem) = b.div_rem(&delta_prime_big);
+            if rem * 2u8 >= delta_prime_big {
+                b += 1u8;
+            }
+            *a = b.iter_u32_digits().next().unwrap_or(0);
+        }
     }
 
     let ddec_end = quanta::Instant::now();
