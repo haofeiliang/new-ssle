@@ -5,7 +5,7 @@
 // cargo run --release --package ssle_core --example ssle --features="gt128" -- -p 256
 // cargo run --release --package ssle_core --example ssle --features="gt128 parallel" -- -p 256 -t 16
 
-use std::sync::Arc;
+use std::{hint::cold_path, sync::Arc};
 
 use clap::Parser;
 use itertools::izip;
@@ -530,6 +530,7 @@ fn party_operation(
             add_mod_u128(e, r, dp);
         }
     } else {
+        cold_path();
         for (value, e, r) in izip!(
             big_uint_dec_share.chunks_exact_mut(big_uint_value_len),
             e_shares.chunks_exact_mut(big_uint_value_len),
@@ -582,6 +583,7 @@ fn party_operation(
                     }
                 });
         } else {
+            cold_path();
             all_e_shares
                 .chunks_exact(big_uint_poly_len * 2)
                 .for_each(|x| {
@@ -602,6 +604,7 @@ fn party_operation(
                 }
             }
         } else {
+            cold_path();
             let mut delta_prime_half = delta_prime.clone();
             delta_prime_half.right_shift_assign(1);
             e_shares.chunks_exact_mut(big_uint_value_len).for_each(|v| {
@@ -625,6 +628,7 @@ fn party_operation(
                 add_mod_u128(a, c, qp128);
             }
         } else {
+            cold_path();
             for (a, b, c) in izip!(
                 big_uint_dec_share.chunks_exact_mut(big_uint_value_len),
                 e_shares.chunks_exact(big_uint_value_len),
@@ -643,6 +647,7 @@ fn party_operation(
                 add_mod_u128(a, b, qp128);
             }
         } else {
+            cold_path();
             for (a, b) in izip!(
                 big_uint_dec_share.chunks_exact_mut(big_uint_value_len),
                 r_mod_q_prime_share.chunks_exact(big_uint_value_len),
@@ -667,6 +672,7 @@ fn party_operation(
                 }
             });
     } else {
+        cold_path();
         all_big_uint_dec_share
             .chunks_exact(big_uint_poly_len * 2)
             .for_each(|x| {
@@ -692,6 +698,7 @@ fn party_operation(
             *a = if rem * 2 >= dp { b_q + 1 } else { b_q } as CommitValueT;
         }
     } else {
+        cold_path();
         for (a, b) in final_commit
             .iter_mut()
             .zip(big_uint_dec_share.chunks_exact(big_uint_value_len))
