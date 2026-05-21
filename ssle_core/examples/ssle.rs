@@ -31,8 +31,8 @@ use primus_reduce::Modulus;
 use rand::RngExt;
 use ssle_core::{
     CoefficientExpansionKey, CommitModulus, CommitTable, CommitValueT, CrtValueT, KeyGen,
-    MasterPublicKey, MasterSecretKeyShare, Party, SsleParameters, biguint_to_u128,
-    generate_dd_random, scale_round_and_mod,
+    MasterPublicKey, MasterSecretKeyShare, Party, SsleParameters, add_mod_u128, biguint_to_u128,
+    generate_dd_random, neg_mod_u128, read_u128, scale_round_and_mod, sub_mod_u128,
 };
 use tracing::{Level, debug, error, info};
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -521,13 +521,14 @@ fn party_operation(
     let mut all_e_shares: Vec<CrtValueT> = vec![0; big_uint_poly_len * 2 * party_count];
 
     if let (Some(q128), Some(qp128), Some(dp128)) = (fast_q, fast_qp, fast_dp) {
+        let dp = dp128.value_unchecked();
         for (value, e, r) in izip!(
             big_uint_dec_share.as_chunks_mut::<2>().0.iter_mut(),
             e_shares.as_chunks_mut::<2>().0.iter_mut(),
             r_mod_delta_prime_share.as_chunks::<2>().0.iter(),
         ) {
             scale_round_and_mod(value, e, q128, qp128, dp128);
-            primus_integer::BigUint(e).add_modulo_assign(&primus_integer::BigUint(r), &delta_prime);
+            add_mod_u128(e, r, dp);
         }
     } else {
         for (value, e, r) in izip!(
@@ -569,58 +570,115 @@ fn party_operation(
 
     if party_id == 0 {
         e_shares.fill(0);
-        all_e_shares
-            .chunks_exact(big_uint_poly_len * 2)
-            .for_each(|x| {
-                for (a, b) in e_shares
-                    .chunks_exact_mut(big_uint_value_len)
-                    .zip(x.chunks_exact(big_uint_value_len))
-                {
-                    BigUint(a).add_modulo_assign(&BigUint(b), &delta_prime);
+        if let Some(dp128) = fast_dp {
+            let dp = dp128.value_unchecked();
+            all_e_shares
+                .chunks_exact(big_uint_poly_len * 2)
+                .for_each(|x| {
+                    for (a, b) in izip!(
+                        e_shares.as_chunks_mut::<2>().0.iter_mut(),
+                        x.as_chunks::<2>().0.iter(),
+                    ) {
+                        add_mod_u128(a, b, dp);
+                    }
+                });
+        } else {
+            all_e_shares
+                .chunks_exact(big_uint_poly_len * 2)
+                .for_each(|x| {
+                    for (a, b) in e_shares
+                        .chunks_exact_mut(big_uint_value_len)
+                        .zip(x.chunks_exact(big_uint_value_len))
+                    {
+                        BigUint(a).add_modulo_assign(&BigUint(b), &delta_prime);
+                    }
+                });
+        }
+        if let Some(dp128) = fast_dp {
+            let dp = dp128.value_unchecked();
+            let dp_half = dp / 2;
+            for v in e_shares.as_chunks_mut::<2>().0.iter_mut() {
+                if read_u128(v) >= dp_half {
+                    neg_mod_u128(v, dp);
+                }
+            }
+        } else {
+            let mut delta_prime_half = delta_prime.clone();
+            delta_prime_half.right_shift_assign(1);
+            e_shares.chunks_exact_mut(big_uint_value_len).for_each(|v| {
+                let mut value = BigUint(v);
+
+                if value.cmp(&delta_prime_half).is_ge() {
+                    value.neg_modulo_assign(&delta_prime);
                 }
             });
-        let mut delta_prime_half = delta_prime.clone();
-        delta_prime_half.right_shift_assign(1);
-        e_shares.chunks_exact_mut(big_uint_value_len).for_each(|v| {
-            let mut value = BigUint(v);
-
-            if value.cmp(&delta_prime_half).is_ge() {
-                value.neg_modulo_assign(&delta_prime);
-            }
-        });
+        }
     }
 
     if party_id == 0 {
-        for (a, b, c) in izip!(
-            big_uint_dec_share.chunks_exact_mut(big_uint_value_len),
-            e_shares.chunks_exact(big_uint_value_len),
-            r_mod_q_prime_share.chunks_exact(big_uint_value_len),
-        ) {
-            BigUint(&mut *a).sub_modulo_assign(&BigUint(b), &q_prime);
-            BigUint(a).add_modulo_assign(&BigUint(c), &q_prime);
+        if let Some(qp128) = fast_qp {
+            for (a, b, c) in izip!(
+                big_uint_dec_share.as_chunks_mut::<2>().0.iter_mut(),
+                e_shares.as_chunks::<2>().0.iter(),
+                r_mod_q_prime_share.as_chunks::<2>().0.iter(),
+            ) {
+                sub_mod_u128(a, b, qp128);
+                add_mod_u128(a, c, qp128);
+            }
+        } else {
+            for (a, b, c) in izip!(
+                big_uint_dec_share.chunks_exact_mut(big_uint_value_len),
+                e_shares.chunks_exact(big_uint_value_len),
+                r_mod_q_prime_share.chunks_exact(big_uint_value_len),
+            ) {
+                BigUint(&mut *a).sub_modulo_assign(&BigUint(b), &q_prime);
+                BigUint(a).add_modulo_assign(&BigUint(c), &q_prime);
+            }
         }
     } else {
-        for (a, b) in izip!(
-            big_uint_dec_share.chunks_exact_mut(big_uint_value_len),
-            r_mod_q_prime_share.chunks_exact(big_uint_value_len),
-        ) {
-            BigUint(a).add_modulo_assign(&BigUint(b), &q_prime);
+        if let Some(qp128) = fast_qp {
+            for (a, b) in izip!(
+                big_uint_dec_share.as_chunks_mut::<2>().0.iter_mut(),
+                r_mod_q_prime_share.as_chunks::<2>().0.iter(),
+            ) {
+                add_mod_u128(a, b, qp128);
+            }
+        } else {
+            for (a, b) in izip!(
+                big_uint_dec_share.chunks_exact_mut(big_uint_value_len),
+                r_mod_q_prime_share.chunks_exact(big_uint_value_len),
+            ) {
+                BigUint(a).add_modulo_assign(&BigUint(b), &q_prime);
+            }
         }
     }
 
     party.share_v2(&big_uint_dec_share, &mut all_big_uint_dec_share);
 
     big_uint_dec_share.fill(0);
-    all_big_uint_dec_share
-        .chunks_exact(big_uint_poly_len * 2)
-        .for_each(|x| {
-            for (a, b) in big_uint_dec_share
-                .chunks_exact_mut(big_uint_value_len)
-                .zip(x.chunks_exact(big_uint_value_len))
-            {
-                BigUint(a).add_modulo_assign(&BigUint(b), &q_prime);
-            }
-        });
+    if let Some(qp128) = fast_qp {
+        all_big_uint_dec_share
+            .chunks_exact(big_uint_poly_len * 2)
+            .for_each(|x| {
+                for (a, b) in izip!(
+                    big_uint_dec_share.as_chunks_mut::<2>().0.iter_mut(),
+                    x.as_chunks::<2>().0.iter(),
+                ) {
+                    add_mod_u128(a, b, qp128);
+                }
+            });
+    } else {
+        all_big_uint_dec_share
+            .chunks_exact(big_uint_poly_len * 2)
+            .for_each(|x| {
+                for (a, b) in big_uint_dec_share
+                    .chunks_exact_mut(big_uint_value_len)
+                    .zip(x.chunks_exact(big_uint_value_len))
+                {
+                    BigUint(a).add_modulo_assign(&BigUint(b), &q_prime);
+                }
+            });
+    }
 
     let mut final_commit: Vec<CommitValueT> = vec![0; ring_poly_length * 2];
 

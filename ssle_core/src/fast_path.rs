@@ -34,7 +34,7 @@ pub fn scale_round_and_mod(
     q_prime: u128,
     delta_prime: BarrettModulus<u128>,
 ) {
-    let val = value[0] as u128 | ((value[1] as u128) << 64);
+    let val = read_u128(value);
 
     let (lo, hi) = WideningMul::widening_mul(val, q_prime);
 
@@ -46,11 +46,53 @@ pub fn scale_round_and_mod(
         result += 1;
     }
 
-    value[0] = result as CrtValueT;
-    value[1] = (result >> 64) as CrtValueT;
+    write_u128(result, value);
 
     let e_val = delta_prime.reduce(result);
 
-    e[0] = e_val as CrtValueT;
-    e[1] = (e_val >> 64) as CrtValueT;
+    write_u128(e_val, e);
+}
+
+/// Read a u128 from two u64 limbs (little-endian).
+#[inline(always)]
+pub fn read_u128(limbs: &[CrtValueT; 2]) -> u128 {
+    limbs[0] as u128 | ((limbs[1] as u128) << 64)
+}
+
+/// Write a u128 into two u64 limbs (little-endian).
+#[inline(always)]
+pub fn write_u128(value: u128, limbs: &mut [CrtValueT; 2]) {
+    limbs[0] = value as CrtValueT;
+    limbs[1] = (value >> 64) as CrtValueT;
+}
+
+/// `*a = (*a + b) % modulus`. All values must be < modulus.
+#[inline(always)]
+pub fn add_mod_u128(a: &mut [CrtValueT; 2], b: &[CrtValueT; 2], modulus: u128) {
+    let mut sum = read_u128(a).wrapping_add(read_u128(b));
+    if sum >= modulus {
+        sum -= modulus;
+    }
+    write_u128(sum, a);
+}
+
+/// `*a = (*a - b) % modulus`. All values must be < modulus.
+#[inline(always)]
+pub fn sub_mod_u128(a: &mut [CrtValueT; 2], b: &[CrtValueT; 2], modulus: u128) {
+    let a_val = read_u128(a);
+    let b_val = read_u128(b);
+    if a_val >= b_val {
+        write_u128(a_val - b_val, a);
+    } else {
+        write_u128(a_val + modulus - b_val, a);
+    }
+}
+
+/// `*a = (-*a) % modulus`. Input must be < modulus.
+#[inline(always)]
+pub fn neg_mod_u128(a: &mut [CrtValueT; 2], modulus: u128) {
+    let val = read_u128(a);
+    if val != 0 {
+        write_u128(modulus - val, a);
+    }
 }

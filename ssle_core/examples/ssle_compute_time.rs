@@ -30,8 +30,9 @@ use primus_reduce::ReduceInv;
 use rand::{RngExt, distr::Uniform};
 use ssle_core::{
     CoefficientExpansionKey, CommitModulus, CommitTable, CommitValueT, CrtValueT, KeyGen,
-    MasterPublicKey, MasterSecretKey, MasterSecretKeyShare, SsleParameters, biguint_to_u128,
-    generate_dd_random, scale_round_and_mod,
+    MasterPublicKey, MasterSecretKey, MasterSecretKeyShare, SsleParameters, add_mod_u128,
+    biguint_to_u128, generate_dd_random, neg_mod_u128, read_u128, scale_round_and_mod,
+    sub_mod_u128,
 };
 use tabled::{Table, Tabled, settings::Rotate};
 use tracing::{debug, error, info, level_filters::LevelFilter};
@@ -508,6 +509,7 @@ fn party_operation(
         }
 
         if let (Some(q128), Some(qp128), Some(dp128)) = (fast_q, fast_qp, fast_dp) {
+            let dp = dp128.value_unchecked();
             for (value, e, r_mod_delta_prime, r_mod_q_prime) in izip!(
                 big_uint_dec_share.as_chunks_mut::<2>().0.iter_mut(),
                 e_share.as_chunks_mut::<2>().0.iter_mut(),
@@ -515,10 +517,8 @@ fn party_operation(
                 r_mod_q_prime_share.as_chunks::<2>().0.iter(),
             ) {
                 scale_round_and_mod(value, e, q128, qp128, dp128);
-                primus_integer::BigUint(e)
-                    .add_modulo_assign(&primus_integer::BigUint(r_mod_delta_prime), &delta_prime);
-                primus_integer::BigUint(value)
-                    .add_modulo_assign(&primus_integer::BigUint(r_mod_q_prime), &q_prime);
+                add_mod_u128(e, r_mod_delta_prime, dp);
+                add_mod_u128(value, r_mod_q_prime, qp128);
             }
         } else {
             for (value, e, r_mod_delta_prime, r_mod_q_prime) in izip!(
@@ -595,6 +595,7 @@ fn party_operation(
         }
 
         if let (Some(q128), Some(qp128), Some(dp128)) = (fast_q, fast_qp, fast_dp) {
+            let dp = dp128.value_unchecked();
             for (value, e, r_mod_delta_prime, r_mod_q_prime) in izip!(
                 big_uint_dec_share.as_chunks_mut::<2>().0.iter_mut(),
                 e_share.as_chunks_mut::<2>().0.iter_mut(),
@@ -602,10 +603,8 @@ fn party_operation(
                 r_mod_q_prime_share.as_chunks::<2>().0.iter(),
             ) {
                 scale_round_and_mod(value, e, q128, qp128, dp128);
-                primus_integer::BigUint(e)
-                    .add_modulo_assign(&primus_integer::BigUint(r_mod_delta_prime), &delta_prime);
-                primus_integer::BigUint(value)
-                    .add_modulo_assign(&primus_integer::BigUint(r_mod_q_prime), &q_prime);
+                add_mod_u128(e, r_mod_delta_prime, dp);
+                add_mod_u128(value, r_mod_q_prime, qp128);
             }
         } else {
             for (value, e, r_mod_delta_prime, r_mod_q_prime) in izip!(
@@ -647,40 +646,82 @@ fn party_operation(
 
     let (p0_e_share, other_e_shares) = all_e_shares.split_at_mut(big_uint_poly_len * 2);
 
-    for e_share in other_e_shares.chunks_exact(big_uint_poly_len * 2) {
-        for (value, e) in izip!(
-            p0_e_share.chunks_exact_mut(big_uint_value_len),
-            e_share.chunks_exact(big_uint_value_len),
-        ) {
-            primus_integer::BigUint(value)
-                .add_modulo_assign(&primus_integer::BigUint(e), &delta_prime);
+    if let Some(dp128) = fast_dp {
+        let dp = dp128.value_unchecked();
+        for e_share in other_e_shares.chunks_exact(big_uint_poly_len * 2) {
+            for (value, e) in izip!(
+                p0_e_share.as_chunks_mut::<2>().0.iter_mut(),
+                e_share.as_chunks::<2>().0.iter(),
+            ) {
+                add_mod_u128(value, e, dp);
+            }
+        }
+    } else {
+        for e_share in other_e_shares.chunks_exact(big_uint_poly_len * 2) {
+            for (value, e) in izip!(
+                p0_e_share.chunks_exact_mut(big_uint_value_len),
+                e_share.chunks_exact(big_uint_value_len),
+            ) {
+                primus_integer::BigUint(value)
+                    .add_modulo_assign(&primus_integer::BigUint(e), &delta_prime);
+            }
         }
     }
 
-    for value in p0_e_share.chunks_exact_mut(big_uint_value_len) {
-        let mut value = primus_integer::BigUint(value);
+    if let Some(dp128) = fast_dp {
+        let dp = dp128.value_unchecked();
+        let dp_half = dp / 2;
+        for value in p0_e_share.as_chunks_mut::<2>().0.iter_mut() {
+            if read_u128(value) >= dp_half {
+                neg_mod_u128(value, dp);
+            }
+        }
+    } else {
+        for value in p0_e_share.chunks_exact_mut(big_uint_value_len) {
+            let mut value = primus_integer::BigUint(value);
 
-        if value.cmp(&delta_prime_half).is_ge() {
-            value.neg_modulo_assign(&delta_prime);
+            if value.cmp(&delta_prime_half).is_ge() {
+                value.neg_modulo_assign(&delta_prime);
+            }
         }
     }
 
     let (p0_big_uint_dec_share, other_big_uint_dec_share) =
         big_uint_dec_shares.split_at_mut(big_uint_poly_len * 2);
 
-    for (value, e) in p0_big_uint_dec_share
-        .chunks_exact_mut(big_uint_value_len)
-        .zip(p0_e_share.chunks_exact(big_uint_value_len))
-    {
-        primus_integer::BigUint(value).sub_modulo_assign(&primus_integer::BigUint(e), &q_prime);
+    if let Some(qp128) = fast_qp {
+        for (value, e) in izip!(
+            p0_big_uint_dec_share.as_chunks_mut::<2>().0.iter_mut(),
+            p0_e_share.as_chunks::<2>().0.iter(),
+        ) {
+            sub_mod_u128(value, e, qp128);
+        }
+    } else {
+        for (value, e) in p0_big_uint_dec_share
+            .chunks_exact_mut(big_uint_value_len)
+            .zip(p0_e_share.chunks_exact(big_uint_value_len))
+        {
+            primus_integer::BigUint(value).sub_modulo_assign(&primus_integer::BigUint(e), &q_prime);
+        }
     }
 
-    for big_uint_dec_share in other_big_uint_dec_share.chunks_exact(big_uint_poly_len * 2) {
-        for (x, y) in p0_big_uint_dec_share
-            .chunks_exact_mut(big_uint_value_len)
-            .zip(big_uint_dec_share.chunks_exact(big_uint_value_len))
-        {
-            primus_integer::BigUint(x).add_modulo_assign(&primus_integer::BigUint(y), &q_prime);
+    if let Some(qp128) = fast_qp {
+        for big_uint_dec_share in other_big_uint_dec_share.chunks_exact(big_uint_poly_len * 2) {
+            for (x, y) in izip!(
+                p0_big_uint_dec_share.as_chunks_mut::<2>().0.iter_mut(),
+                big_uint_dec_share.as_chunks::<2>().0.iter(),
+            ) {
+                add_mod_u128(x, y, qp128);
+            }
+        }
+    } else {
+        for big_uint_dec_share in other_big_uint_dec_share.chunks_exact(big_uint_poly_len * 2) {
+            for (x, y) in p0_big_uint_dec_share
+                .chunks_exact_mut(big_uint_value_len)
+                .zip(big_uint_dec_share.chunks_exact(big_uint_value_len))
+            {
+                primus_integer::BigUint(x).add_modulo_assign(&primus_integer::BigUint(y), &q_prime);
+            }
         }
     }
 

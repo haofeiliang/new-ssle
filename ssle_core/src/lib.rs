@@ -17,4 +17,7 @@ pub use master_secret_key::{MasterSecretKey, MasterSecretKeyShare, generate_dd_r
 pub use party::Party;
 
 mod fast_path;
-pub use fast_path::{biguint_to_u128, scale_round_and_mod};
+pub use fast_path::{
+    add_mod_u128, biguint_to_u128, neg_mod_u128, read_u128, scale_round_and_mod, sub_mod_u128,
+    write_u128,
+};
