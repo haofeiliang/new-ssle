@@ -434,7 +434,6 @@ fn party_operation(
                 .chunks_exact_mut(rns_glwe_len)
                 .zip(rr_commit.iter_poly(commit_poly_length))
                 .for_each(|(encode_commit, poly)| {
-                    temp.fill(0);
                     temp.iter_mut()
                         .zip(poly.iter())
                         .for_each(|(x, y)| *x = *y as CrtValueT);
