@@ -2,20 +2,34 @@
 # Parse benchmark result files and compute average all_compute time per party count.
 # Outputs CSV rows: scheme, party_count, avg_all_compute_ms
 #
-# Usage: ./analyze_bench.sh [--data-only] <result-file>
+# Usage: ./analyze_bench.sh <result-file> [--data-only] [--stats]
 #   --data-only   suppress the header lines, print only CSV data
+#   --stats       append a statistics table (stddev, min, max) after the CSV output
 
 set -euo pipefail
 
 # --- Parse arguments ---
 data_only=0
-if [ "$#" -eq 2 ] && [ "$1" = "--data-only" ]; then
-    data_only=1
-    input_file="${2//\\//}"
-elif [ "$#" -eq 1 ]; then
-    input_file="${1//\\//}"
-else
-    echo "Usage: $0 [--data-only] <benchmark-result-file>" >&2
+stats=0
+input_file=""
+
+for arg in "$@"; do
+    case "$arg" in
+        --data-only) data_only=1 ;;
+        --stats)     stats=1 ;;
+        *)
+            if [ -z "$input_file" ]; then
+                input_file="${arg//\\//}"
+            else
+                echo "Usage: $0 <benchmark-result-file> [--data-only] [--stats]" >&2
+                exit 2
+            fi
+            ;;
+    esac
+done
+
+if [ -z "$input_file" ]; then
+    echo "Usage: $0 [--data-only] [--stats] <benchmark-result-file>" >&2
     exit 2
 fi
 
@@ -58,8 +72,11 @@ thread_count == "" && match($0, /Results for thread count t=([0-9]+)/, thread_ma
 
 # Extract all_compute elapsed time, e.g. "| all_compute        | 1.234 ms |"
 current_p != "" && match($0, /\|[[:space:]]*all_compute[[:space:]]*\|[[:space:]]*([0-9]+(\.[0-9]+)?)[[:space:]]*(ns|us|µs|μs|ms|s)[[:space:]]*\|/, time_match) {
-    sums[current_p]   += to_ms(time_match[1] + 0.0, time_match[3])
+    v = to_ms(time_match[1] + 0.0, time_match[3])
+    sums[current_p]   += v
     counts[current_p] += 1
+    idx[current_p]++
+    vals[current_p, idx[current_p]] = v
 }
 
 END {
@@ -102,10 +119,46 @@ END {
         }
     }
 
-    # Output sorted results
+    # Output sorted CSV results
     for (i = 1; i <= n; i++) {
         p = ordered[i]
         printf "%s, %d, %.6f\n", scheme, p, sums[p] / counts[p]
     }
+
+    # --- Statistics table (optional) ---
+    if (stats) {
+        printf "\n"
+        print "--- Statistics ---"
+        print "scheme, party_count, runs, avg_ms, stddev_ms, min_ms, max_ms"
+
+        for (i = 1; i <= n; i++) {
+            p = ordered[i]
+            c = counts[p]
+            m = sums[p] / c
+
+            if (c < 2) {
+                printf "%s, %d, %d, %.6f, %s, %.6f, %.6f\n", scheme, p, c, m, "N/A", m, m
+                continue
+            }
+
+            # Sample standard deviation
+            ss = 0
+            for (j = 1; j <= c; j++) {
+                d = vals[p, j] - m
+                ss += d * d
+            }
+            stddev = sqrt(ss / (c - 1))
+
+            # Min / max
+            minv = vals[p, 1]
+            maxv = vals[p, 1]
+            for (j = 2; j <= c; j++) {
+                if (vals[p, j] < minv) minv = vals[p, j]
+                if (vals[p, j] > maxv) maxv = vals[p, j]
+            }
+
+            printf "%s, %d, %d, %.6f, %.6f, %.6f, %.6f\n", scheme, p, c, m, stddev, minv, maxv
+        }
+    }
 }
-' data_only="$data_only" input_file="$input_file" "$input_file"
+' data_only="$data_only" stats="$stats" input_file="$input_file" "$input_file"

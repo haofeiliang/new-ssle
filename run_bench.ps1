@@ -42,6 +42,31 @@ $OutputEncoding = $Utf8NoBom
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 
+# --- System tuning for consistent benchmarks ---
+
+# Raise process priority to reduce scheduling jitter (High does not require admin)
+try {
+    [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass =
+        [System.Diagnostics.ProcessPriorityClass]::High
+    Write-Host "Process priority: High"
+}
+catch {
+    Write-Host "Process priority: Normal (could not raise)"
+}
+
+# Check power plan (changing it requires admin, so just warn)
+$powerPlan = powercfg /getactivescheme 2>$null
+if ($powerPlan -match "High performance") {
+    Write-Host "Power plan: High Performance (optimal)"
+}
+else {
+    Write-Host "WARNING: Power plan is not 'High Performance'."
+    Write-Host "  For consistent results, run (as admin):"
+    Write-Host "  powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"
+}
+
+Write-Host ""
+
 # --- Parameters ---
 $Threads = $ThreadsArg -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
 
@@ -157,30 +182,33 @@ foreach ($Block in $Blocks) {
             Write-Log "Features unchanged, skip build." $OutFile
         }
 
-        # Run benchmarks for each party count
+        # Run the compiled binary directly (avoids cargo run overhead)
+        $Binary = Join-Path $ScriptDir "target/release/examples/$Example.exe"
+        if (-not (Test-Path -LiteralPath $Binary -PathType Leaf)) {
+            throw "Compiled binary not found: $Binary"
+        }
+
         foreach ($p in ($PList -split "\s+" | Where-Object { $_ -ne "" })) {
             Write-Log "--- Testing p=$p ---" $OutFile
 
             for ($i = 1; $i -le $Repeat; $i++) {
                 Write-Log "Run $i/$Repeat" $OutFile
 
-                $RunArgs = $CargoToolchainArgs + @(
-                    "run", "--quiet", "--release",
-                    "--package", "ssle_core",
-                    "--example", $Example,
-                    "--features=$Features",
-                    "--", "-p", "$p"
-                ) + $TArgs
+                $RunArgs = @("-p", "$p") + $TArgs
 
-                & cargo @RunArgs |
+                & $Binary @RunArgs |
                     Out-File -FilePath $OutFile -Append -Encoding utf8
 
                 if ($LASTEXITCODE -ne 0) {
-                    throw "cargo run failed with exit code $LASTEXITCODE"
+                    throw "binary run failed with exit code $LASTEXITCODE"
                 }
 
                 Start-Sleep -Seconds 1
             }
+
+            # Cooldown: longer pause after large party counts to avoid thermal throttling
+            $CooldownMs = if ([int]$p -ge 1024) { 5000 } elseif ([int]$p -ge 512) { 3000 } else { 500 }
+            Start-Sleep -Milliseconds $CooldownMs
         }
     }
 }
@@ -198,5 +226,5 @@ Write-Host "Average all_compute time:"
 Write-Host "scheme, party_count, avg_all_compute_ms"
 foreach ($t in $Threads) {
     $OutFile = Join-Path $OutputDir "${ResultTag}_t${t}.txt"
-    & $AnalyzeScript $OutFile -DataOnly
+    & $AnalyzeScript $OutFile -DataOnly -Stats
 }

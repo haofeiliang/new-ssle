@@ -1,14 +1,16 @@
 # Parse benchmark result files and compute average all_compute time per party count.
 # Outputs CSV rows: scheme, party_count, avg_all_compute_ms
 #
-# Usage: .\analyze_bench.ps1 <result-file> [-DataOnly]
+# Usage: .\analyze_bench.ps1 <result-file> [-DataOnly] [-Stats]
 #   -DataOnly   suppress the header lines, print only CSV data
+#   -Stats      append a statistics table (stddev, min, max) after the CSV output
 
 param(
     [Parameter(Mandatory = $true, Position = 0)]
     [string]$InputFile,
 
-    [switch]$DataOnly
+    [switch]$DataOnly,
+    [switch]$Stats
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,7 +43,7 @@ function Convert-ToMilliseconds {
 #   | all_compute        | 1.234 ms |
 $AllComputePattern = '\|\s*all_compute\s*\|\s*([0-9]+(?:\.[0-9]+)?)\s*(ns|us|µs|μs|ms|s)\s*\|'
 
-$Stats = @{}
+$PartyStats = @{}
 $CurrentP = $null
 $ThreadCount = $null
 $InvariantCulture = [System.Globalization.CultureInfo]::InvariantCulture
@@ -56,10 +58,11 @@ foreach ($Line in Get-Content -LiteralPath $InputFile) {
     # Detect party count section
     if ($Line -match "--- Testing p=(\d+)\b") {
         $CurrentP = [int]$Matches[1]
-        if (-not $Stats.ContainsKey($CurrentP)) {
-            $Stats[$CurrentP] = [pscustomobject]@{
-                Count = 0
-                SumMs = 0.0
+        if (-not $PartyStats.ContainsKey($CurrentP)) {
+            $PartyStats[$CurrentP] = [pscustomobject]@{
+                Count  = 0
+                SumMs  = 0.0
+                Values = [System.Collections.Generic.List[double]]::new()
             }
         }
         continue
@@ -68,12 +71,13 @@ foreach ($Line in Get-Content -LiteralPath $InputFile) {
     # Extract all_compute elapsed time
     if ($null -ne $CurrentP -and $Line -match $AllComputePattern) {
         $ElapsedMs = Convert-ToMilliseconds -Value ([double]$Matches[1]) -Unit $Matches[2]
-        $Stats[$CurrentP].Count += 1
-        $Stats[$CurrentP].SumMs += $ElapsedMs
+        $PartyStats[$CurrentP].Count += 1
+        $PartyStats[$CurrentP].SumMs += $ElapsedMs
+        $PartyStats[$CurrentP].Values.Add($ElapsedMs)
     }
 }
 
-if ($Stats.Count -eq 0) {
+if ($PartyStats.Count -eq 0) {
     throw "No all_compute results found in: $InputFile"
 }
 
@@ -90,16 +94,50 @@ else {
     $Scheme = "Relect($ThreadCount threads)"
 }
 
-# --- Output ---
+# --- CSV Output (always) ---
 if (-not $DataOnly) {
     "Input: $InputFile"
     "scheme, party_count, avg_all_compute_ms"
 }
 
-foreach ($P in ($Stats.Keys | Sort-Object {[int]$_})) {
-    $Item = $Stats[$P]
+foreach ($P in ($PartyStats.Keys | Sort-Object {[int]$_})) {
+    $Item = $PartyStats[$P]
     if ($Item.Count -gt 0) {
         $AverageMs = $Item.SumMs / $Item.Count
         "{0}, {1}, {2}" -f $Scheme, $P, $AverageMs.ToString("F6", $InvariantCulture)
+    }
+}
+
+# --- Statistics Table (optional) ---
+if ($Stats) {
+    ""
+    "--- Statistics ---"
+    "scheme, party_count, runs, avg_ms, stddev_ms, min_ms, max_ms"
+
+    foreach ($P in ($PartyStats.Keys | Sort-Object {[int]$_})) {
+        $Item = $PartyStats[$P]
+        $n = $Item.Count
+        if ($n -lt 2) {
+            # Need at least 2 runs for sample stddev
+            $AvgMs = if ($n -eq 1) { $Item.Values[0] } else { 0 }
+            "{0}, {1}, {2}, {3}, {4}, {5}, {6}" -f $Scheme, $P, $n,
+                $AvgMs.ToString("F6", $InvariantCulture),
+                "N/A",
+                $AvgMs.ToString("F6", $InvariantCulture),
+                $AvgMs.ToString("F6", $InvariantCulture)
+            continue
+        }
+
+        $AvgMs = $Item.SumMs / $n
+        $Variance = ($Item.Values | ForEach-Object { ($_ - $AvgMs) * ($_ - $AvgMs) } | Measure-Object -Sum).Sum / ($n - 1)
+        $StddevMs = [Math]::Sqrt($Variance)
+        $MinMs = ($Item.Values | Measure-Object -Minimum).Minimum
+        $MaxMs = ($Item.Values | Measure-Object -Maximum).Maximum
+
+        "{0}, {1}, {2}, {3}, {4}, {5}, {6}" -f $Scheme, $P, $n,
+            $AvgMs.ToString("F6", $InvariantCulture),
+            $StddevMs.ToString("F6", $InvariantCulture),
+            $MinMs.ToString("F6", $InvariantCulture),
+            $MaxMs.ToString("F6", $InvariantCulture)
     }
 }

@@ -58,6 +58,24 @@ if [ -n "$TOOLCHAIN_ARG" ]; then
     CARGO_TC=("$TOOLCHAIN_ARG")
 fi
 
+# --- System tuning for consistent benchmarks ---
+
+# Raise process priority to reduce scheduling jitter
+renice -n -10 -p $$ 2>/dev/null && echo "Process niceness: -10" || echo "Process priority: default (may need CAP_SYS_NICE or sudo)"
+
+# Check CPU governor (Linux only; changing it requires root, so just warn)
+if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
+    governor=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null)
+    if [ "$governor" = "performance" ]; then
+        echo "CPU governor: performance (optimal)"
+    else
+        echo "WARNING: CPU governor is '$governor'. For consistent results:"
+        echo "  sudo cpupower frequency-set -g performance"
+    fi
+fi
+
+echo ""
+
 # --- Output setup ---
 OUTPUT_DIR="results"
 mkdir -p "$OUTPUT_DIR"
@@ -144,18 +162,29 @@ for block in "${BLOCKS[@]}"; do
             echo "Features unchanged, skip build." | tee -a "$OUTFILE"
         fi
 
-        # Run benchmarks for each party count
+        # Run the compiled binary directly (avoids cargo run overhead)
+        BINARY="$SCRIPT_DIR/target/release/examples/$example"
+        if [ ! -f "$BINARY" ]; then
+            echo "Compiled binary not found: $BINARY" >&2
+            exit 1
+        fi
+
         for p in $p_list; do
             echo "--- Testing p=$p ---" | tee -a "$OUTFILE"
             for ((i=1; i<=REPEATS; i++)); do
                 echo "Run $i/$REPEATS" | tee -a "$OUTFILE"
-                cargo "${CARGO_TC[@]}" run --quiet --release \
-                    --package ssle_core \
-                    --example "$example" \
-                    --features="$features" \
-                    -- -p "$p" $t_args >> "$OUTFILE"
+                "$BINARY" -p "$p" $t_args >> "$OUTFILE"
                 sleep 1
             done
+
+            # Cooldown: longer pause after large party counts to avoid thermal throttling
+            if [ "$p" -ge 1024 ]; then
+                sleep 5
+            elif [ "$p" -ge 512 ]; then
+                sleep 3
+            else
+                sleep 0.5
+            fi
         done
     done
 done
@@ -173,5 +202,5 @@ echo
 echo "Average all_compute time:"
 echo "scheme, party_count, avg_all_compute_ms"
 for t in "${THREADS[@]}"; do
-    bash "$ANALYZE_SCRIPT" --data-only "${OUTPUT_DIR}/${RESULT_TAG}_t${t}.txt"
+    bash "$ANALYZE_SCRIPT" "${OUTPUT_DIR}/${RESULT_TAG}_t${t}.txt" --data-only --stats
 done
