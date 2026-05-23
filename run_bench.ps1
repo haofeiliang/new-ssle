@@ -97,7 +97,6 @@ if ($Simd) {
 
 $BuildLog = Join-Path $OutputDir "build_log.txt"
 "" | Out-File -FilePath $BuildLog -Encoding utf8
-$env:RUST_LOG = "off"
 
 Write-Host "Results: $OutputDir/${ResultTag}_t*.txt"
 Write-Host "Build log: $BuildLog"
@@ -196,8 +195,10 @@ foreach ($Block in $Blocks) {
 
                 $RunArgs = @("-p", "$p") + $TArgs
 
+                $env:RUST_LOG = "off"
                 & $Binary @RunArgs |
                     Out-File -FilePath $OutFile -Append -Encoding utf8
+                $env:RUST_LOG = $null
 
                 if ($LASTEXITCODE -ne 0) {
                     throw "binary run failed with exit code $LASTEXITCODE"

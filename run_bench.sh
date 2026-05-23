@@ -92,7 +92,6 @@ fi
 
 BUILD_LOG="$OUTPUT_DIR/build_log.txt"
 : > "$BUILD_LOG"
-export RUST_LOG=off
 
 echo "Results: ${OUTPUT_DIR}/${RESULT_TAG}_t*.txt"
 echo "Build log: $BUILD_LOG"
@@ -173,7 +172,7 @@ for block in "${BLOCKS[@]}"; do
             echo "--- Testing p=$p ---" | tee -a "$OUTFILE"
             for ((i=1; i<=REPEATS; i++)); do
                 echo "Run $i/$REPEATS" | tee -a "$OUTFILE"
-                "$BINARY" -p "$p" $t_args >> "$OUTFILE"
+                RUST_LOG=off "$BINARY" -p "$p" $t_args >> "$OUTFILE"
                 sleep 1
             done
 
