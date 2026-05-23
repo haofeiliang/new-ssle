@@ -73,7 +73,7 @@ impl TcpPairWise {
         let mut ext_connections = listen_handle.await??;
         connections.append(&mut ext_connections);
 
-        connections.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        connections.sort_unstable_by_key(|a| a.0);
 
         let connections: Vec<_> = connections
             .into_iter()

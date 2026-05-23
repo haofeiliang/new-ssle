@@ -36,7 +36,7 @@ impl TcpCollect {
                 i -= 1;
             }
 
-            connections.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+            connections.sort_unstable_by_key(|a| a.0);
 
             let connections: Vec<_> = connections
                 .into_iter()

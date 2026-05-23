@@ -43,7 +43,7 @@ fn test_rotate_commit() {
     let commit = commit_sk.encrypt_zeros(commit_params, &commit_ntt_table, rng);
 
     // Check commit
-    let decrypt_commit = commit_sk.decrypt(&commit, &commit_params, &commit_ntt_table);
+    let decrypt_commit = commit_sk.decrypt(&commit, commit_params, &commit_ntt_table);
     assert!(decrypt_commit.iter().copied().all(|v| v == 0));
 
     let commit = commit.into_coeff_form(&commit_ntt_table);
@@ -235,7 +235,7 @@ fn test_rotate_commit2() {
     let commit = commit_sk.encrypt_zeros(commit_params, &commit_ntt_table, rng);
 
     // Check commit
-    let decrypt_commit = commit_sk.decrypt(&commit, &commit_params, &commit_ntt_table);
+    let decrypt_commit = commit_sk.decrypt(&commit, commit_params, &commit_ntt_table);
     assert!(decrypt_commit.iter().copied().all(|v| v == 0));
 
     let commit = commit.into_coeff_form(&commit_ntt_table);

@@ -130,7 +130,7 @@ async fn main() -> anyhow::Result<()> {
 
     tcp_pairwise.close().await?;
 
-    let file = File::create(&format!("p{party_count}_id{id}_tcp_{suffix}.csv"))?;
+    let file = File::create(format!("p{party_count}_id{id}_tcp_{suffix}.csv"))?;
 
     let writer = BufWriter::new(file);
 

@@ -131,7 +131,7 @@ async fn main() -> anyhow::Result<()> {
     tcp_collect.close().await?;
 
     if id > 0 {
-        let file = File::create(&format!("p{party_count}_id{id}_tcp_{suffix}.csv"))?;
+        let file = File::create(format!("p{party_count}_id{id}_tcp_{suffix}.csv"))?;
 
         let writer = BufWriter::new(file);
 
