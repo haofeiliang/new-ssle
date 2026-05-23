@@ -23,6 +23,7 @@ rand = { workspace = true }
 bytemuck = { workspace = true }
 bytes = { workspace = true }
 num = { version = "0.4.3", features = ["rand"] }
+tracing = { workspace = true }
 
 [dev-dependencies]
 mimalloc = { workspace = true }
@@ -34,7 +35,6 @@ itertools = { workspace = true }
 tabled = "0.20"
 quanta = "0.12"
 indicatif = { workspace = true }
-tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = [
     "parking_lot",
     "time",

@@ -6,6 +6,8 @@ mod master_secret_key;
 
 mod party;
 
+pub mod protocol;
+
 pub use parameters::{
     CommitModulus, CommitTable, CommitValueT, CrtTable, CrtValueT, SsleParameters,
 };
