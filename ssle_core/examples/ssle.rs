@@ -226,10 +226,12 @@ fn main() {
 ///   6. Share & aggregate encoded commits (Alg.2 lines 31-32)
 ///
 ///   **Round 2 — Elect + Combine (§4.3.2 + §4.4, Alg.2 lines 30-38):**
-///   7. Each party computes decrypt share (PartialDec, Alg.2 lines 33-34)
-///   8. Share e-shares → Party 0 aggregates & centers
-///   9. Party 0 subtracts e, all parties mask with r_q'
-///   10. Combine partial decryptions (§4.4, Alg.2 lines 36-38)
+///     Distributed decryption via Ajax "mask-then-open" (2025/1834, Fig.10).
+///   7. Each party: phase decrypt → INTT → RNS compose → scale-round → mask
+///      with pre-shared randoms (r_Δ', r_q') (Alg.2 lines 33-34)
+///   8. Share e-shares → Party 0 opens e+r (Fig.10 step 2), centers
+///   9. Party 0 subtracts e from value → recovers Δ·m (Fig.10 step 3)
+///   10. Share & aggregate value shares → Combine (§4.4, Alg.2 lines 36-38)
 ///
 ///   **Verification (§4.5 Verify, Alg.2 lines 39-43):**
 ///   11. com ← (v·a_r, v·b_r) · u^{-1} mod (X^n+1); Dec(H(sk), com) == 0?

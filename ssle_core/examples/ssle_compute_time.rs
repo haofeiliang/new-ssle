@@ -217,8 +217,8 @@ fn main() {
 
     // Communication size estimation.
     // Computes the bandwidth per party for Round 1 (Relect, §4.3.1) and
-    // Round 2 (Distributed Decryption, §4.3.2 + §4.4) under the current
-    // RNS parameter sets.
+    // Round 2 (distributed decryption via Ajax 2025/1834 "mask-then-open",
+    // instantiating Relect §4.3.2 + §4.4) under the current RNS parameter sets.
     {
         let ring_params = params.ring_params();
         let ggsw_params = params.ggsw_params();

@@ -1,7 +1,6 @@
 use std::{hint::cold_path, time::Instant};
 
 use num::Integer;
-use tracing::{debug, info};
 use primus_factor::ShoupFactor;
 #[cfg(not(feature = "parallel"))]
 use primus_fhe_core::DcrtGlweExpandCoeffContext;
@@ -21,6 +20,7 @@ use primus_poly::{ArrayBase, DcrtPolynomial, Polynomial, PolynomialOwned};
 use primus_reduce::{Modulus, ReduceInv};
 use primus_rns::RNSBase;
 use rand::RngExt;
+use tracing::{debug, info};
 
 use crate::{
     CoefficientExpansionKey, CommitModulus, CommitTable, CommitValueT, CrtTable, CrtValueT,
@@ -234,14 +234,17 @@ pub fn aggregate_encode_commits(
 
 /// Phase-decrypt one GLWE slot and compose CRT residues to BigUint.
 ///
-/// Party 0 uses `phase_inplace` (full secret key material); other parties use
-/// `phase_a_inplace` (their secret key share). After phase decryption, the
-/// resulting CRT polynomial is inverse-NTT-transformed and composed from the
-/// RNS basis into BigUint coefficients via `compose_multiple_values_inplace`.
+/// Party 0 uses `phase_inplace` (full secret key material); other parties
+/// use `phase_a_inplace` (their secret key share). This computes an additive
+/// share of u_q = Δ·m + e_q, corresponding to step 1 of the Ajax distributed
+/// decryption protocol (2025/1834, Figure 10, line 1).
+///
+/// After phase decryption, the CRT polynomial is inverse-NTT-transformed and
+/// composed from the RNS basis into BigUint coefficients.
 ///
 /// `crt_out` (scratch, `rns_poly_len`) and `big_uint_out` (output,
-/// `big_uint_poly_len`) must be pre-allocated. `compose_buffer` is a scratch
-/// buffer obtained from the external product context.
+/// `big_uint_poly_len`) must be pre-allocated. `compose_buffer` is obtained
+/// from the external product context.
 #[inline]
 pub fn decrypt_and_compose_slot(
     msk_share: &MasterSecretKeyShare,
@@ -265,19 +268,26 @@ pub fn decrypt_and_compose_slot(
 
 /// Process one party's full distributed decryption share.
 ///
-/// For each of the two GLWE slots in the final encoded commit:
-///   1. Phase-decrypt (phase/phase_a depending on party index)
-///   2. Inverse-NTT the CRT polynomial
-///   3. Compose RNS residues → BigUint coefficients
+/// Implements the "mask-then-open" distributed decryption from Ajax
+/// (2025/1834, Figure 10). SSLE adapts this by using pre-shared independent
+/// randoms (r_Δ', r_q') from setup, rather than Ajax's online MPC-generated
+/// coupled double-sharing (r, r_q) over two rings. This simplification is
+/// valid in the all-but-one threshold setting.
 ///
-/// Then scale-round the decrypted values:
-///   value ← round(value · q' / q) mod q'
-///   e     ← (value mod Δ') + r_Δ'  mod Δ'
+/// For each of the two GLWE slots:
+///   1. Phase-decrypt → additive share of u_q = Δ·m + e_q  (Fig.10 step 1)
+///   2. INTT + RNS compose → BigUint coefficients
+///   3. Scale-round: value = round(u_q · q' / q) mod q'  (modulus switching)
+///      e = value mod Δ'  (extract error share, Fig.10 step 1 bottom)
+///   4. Mask: e += r_Δ' (mod Δ'), value += r_q' (mod q')  (Fig.10 steps 2-3)
 ///
 /// The u128 fast path is used when q, q', Δ' all fit in u128 (true for
 /// all current parameter sets); otherwise the BigUint fallback is taken.
-/// Corresponds to Algorithm 2 lines 33-35 (PartialDec) + lines 36-38
-/// (Combine), which implement the distributed decryption (§4.3.2 + §4.4).
+///
+/// After all parties complete, Party 0 aggregates e-shares (opens e+r,
+/// Fig.10 step 2), centers, and subtracts e from value to recover Δ·m
+/// (Fig.10 step 3). The Combine phase (§4.4, Alg.2 lines 36-38) then
+/// reconstructs the final result.
 #[inline]
 #[allow(clippy::too_many_arguments)]
 fn decrypt_share_for_party(
@@ -371,14 +381,13 @@ fn decrypt_share_for_party(
 
 /// BigUint fallback for scale-round-and-mod (cold path, `#[inline(never)]`).
 ///
-/// Computes:
-///   value ← round(value · q' / q) mod q'
-///   e     ← (value mod Δ') + r_Δ'  mod Δ'
+/// Implements the modulus-switching step of Ajax (2025/1834, Fig.10 step 1):
+///   value ← round(value · q' / q) mod q'    (switch modulus from q to q')
+///   e     ← (value mod Δ') + r_Δ'  mod Δ'  (extract error share, mask)
 ///
-/// This is the general BigUint implementation used when the moduli exceed
-/// 128 bits. The u128 fast path in `scale_round_and_mod` is preferred for
-/// the current parameter sets (q, q', Δ' all fit in u128), but this
-/// fallback ensures correctness for any parameter size.
+/// The u128 fast path (`scale_round_and_mod`) is preferred for the current
+/// parameter sets (q, q', Δ' all fit in u128); this fallback uses generic
+/// BigUint arithmetic for correctness at any parameter size.
 ///
 /// Note: `r_mod_q_prime` is NOT added to `value` here — call
 /// `add_random_biguint` separately after the network round.
@@ -717,8 +726,9 @@ pub struct PhaseTimings {
 ///   3. **Commit re-randomization & encoding** (§4.3.1, Alg.2 lines 24-28):
 ///      com_{i,k} ← com_i + RLWE.Enc(pk_i, 0); parta += sel_i ⊙ a_{i,k}; ...
 ///
-///   4. **Distributed decryption** (§4.3.2 Elect + §4.4 Combine, Alg.2 lines 30-38):
-///      PartialDec with msk_i; Combine → (v·a_r, v·b_r)
+///   4. **Distributed decryption** (Ajax 2025/1834 "mask-then-open", Fig.10;
+///      instantiates Relect Alg.2 lines 30-38, §4.3.2 + §4.4):
+///      PartialDec with msk_i; masked share; open e+r; Combine → (v·a_r, v·b_r)
 ///
 ///   5. **Verification** (§4.5 Verify, Alg.2 lines 39-43):
 ///      com ← (v·a_r, v·b_r) · u^{-1} mod (X^n+1); Dec(H(sk), com) == 0
@@ -885,7 +895,10 @@ pub fn run_compute_time_protocol(
 
     // ===== Phase 1/5: External Product Chain (§4.3.1, Alg.2 lines 20-21) =====
     // ct ← RLWE(u); for i: ct ← ctr_i ⊡ ct  (RGSW external product chain)
-    debug!("[Phase 1/5] External product chain — accumulating {} RGSW ciphertexts", rgsw_count);
+    debug!(
+        "[Phase 1/5] External product chain — accumulating {} RGSW ciphertexts",
+        rgsw_count
+    );
     let phase1_start = Instant::now();
 
     let mut acc: CrtGlwe<Vec<CrtValueT>> = mpk.generate_init_acc(party_count);
@@ -903,7 +916,10 @@ pub fn run_compute_time_protocol(
 
     // ===== Phase 2/5: Coefficient Expansion (§4.3.1, Alg.2 line 22) =====
     // {sel_i} ← PartialObliviousExpand(ct, G) → per-party selector ciphertexts
-    debug!("[Phase 2/5] Coefficient expansion → {} selectors", party_count);
+    debug!(
+        "[Phase 2/5] Coefficient expansion → {} selectors",
+        party_count
+    );
     let expand_partial_coefficients_start = Instant::now();
 
     #[cfg(not(feature = "parallel"))]
@@ -981,12 +997,19 @@ pub fn run_compute_time_protocol(
 
     let phase1_end = Instant::now();
 
-    // ===== Phase 4/5: Distributed Decryption (§4.3.2 Elect, Alg.2 lines 30-38) =====
-    // Each party: PartialDec with msk_i → masked share (Alg.2 lines 33-34).
-    // Party 0 aggregates, centers, and subtracts.
-    // Then Combine → (v·a_r, v·b_r) (Alg.2 lines 36-38, §4.4).
-    debug!("[Phase 4/5] Distributed decryption — {} parties computing shares", party_count);
-    debug!("  Parties 1..{} start (not timed — parallel in real execution)", party_count - 1);
+    // ===== Phase 4/5: Distributed Decryption =====
+    // "Mask-then-open" protocol from Ajax (2025/1834, Fig.10), instantiating
+    // the PartialDec + Combine steps of Relect (Alg.2 lines 33-38, §4.3.2+§4.4).
+    // Each party: phase → INTT → RNS compose → scale-round → mask with randoms.
+    // Party 0 opens e+r, centers, and subtracts e from value → recovers Δ·m.
+    debug!(
+        "[Phase 4/5] Distributed decryption — {} parties computing shares",
+        party_count
+    );
+    debug!(
+        "  Parties 1..{} start (not timed — parallel in real execution)",
+        party_count - 1
+    );
     for (
         msk_share,
         crt_dec_share,
