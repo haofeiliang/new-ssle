@@ -215,26 +215,19 @@ fn main() {
 
 /// Per-party protocol thread.
 ///
-/// Protocol outline (Algorithm 2):
+/// Protocol outline (4 online communication rounds + offline pre-share):
 ///
-///   **Round 1 — GenInstance + ParElect (§4.2 + §4.3.1, Alg.2 lines 9-29):**
-///   1. Share commits & public keys (Alg.2 lines 10-13)
-///   2. Share RGSW ciphertexts (Alg.2 lines 14-15)
-///   3. External product chain: ct ← ∏ ctr_i ⊡ ct (Alg.2 lines 19-21)
-///   4. Coefficient expansion: {sel_i} ← PartialObliviousExpand (Alg.2 line 22)
-///   5. Re-randomize & encode: parta += sel_i ⊙ a_{i,k} (Alg.2 lines 24-28)
-///   6. Share & aggregate encoded commits (Alg.2 lines 31-32)
-///
-///   **Round 2 — Elect + Combine (§4.3.2 + §4.4, Alg.2 lines 30-38):**
-///     Distributed decryption via Ajax "mask-then-open" (2025/1834, Fig.10).
-///   7. Each party: phase decrypt → INTT → RNS compose → scale-round → mask
-///      with pre-shared randoms (r_Δ', r_q') (Alg.2 lines 33-34)
-///   8. Share e-shares → Party 0 opens e+r (Fig.10 step 2), centers
-///   9. Party 0 subtracts e from value → recovers Δ·m (Fig.10 step 3)
-///   10. Share & aggregate value shares → Combine (§4.4, Alg.2 lines 36-38)
-///
-///   **Verification (§4.5 Verify, Alg.2 lines 39-43):**
-///   11. com ← (v·a_r, v·b_r) · u^{-1} mod (X^n+1); Dec(H(sk), com) == 0?
+///   **Offline** — Share commits & public keys (§4.2, Alg.2 lines 10-13)
+///   **Round 1** — Share RGSW → external product chain + coefficient expansion
+///     (§4.2 GenInstance lines 14-15; §4.3.1 ParElect lines 20-22)
+///   **Round 2** — Share encoded commits after re-randomization & encoding
+///     (§4.3.1 ParElect lines 24-28; aggregation: §4.3.2 Elect lines 31-32)
+///   **Round 3** — Share e-shares → Party 0 aggregates & centers
+///     (Ajax 2025/1834 Fig.10 steps 1-2; Alg.2 lines 33-34, §4.3.2 Elect)
+///   **Round 4** — Share value shares → Combine
+///     (Ajax 2025/1834 Fig.10 steps 3-4; Alg.2 lines 36-38, §4.4 Combine)
+///   **Final** — Verify (local only): com ← (v·a_r, v·b_r) · u^{-1} mod (X^n+1);
+///     Dec(H(sk), com) == 0? (§4.5, Alg.2 lines 39-43)
 fn party_operation(
     party_id: Id,
     participants: Vec<Participant>,
@@ -321,18 +314,13 @@ fn party_operation(
         vec![Rlwe::zero(commit_rlwe_len); party_count];
 
     if party_id == 0 {
-        debug!("Party {party_id}: Start share commit.");
+        debug!(
+            "[Offline] Share commits & public keys \
+             (Alg.2 lines 10-13, §4.2 GenInstance)"
+        );
     }
     party.share_v3(&commit, all_commit.as_mut_slice());
-
-    if party_id == 0 {
-        debug!("Party {party_id}: Start share pk.");
-    }
     party.share_v3(&commit_pk, all_commit_pk.as_mut_slice());
-
-    if party_id == 0 {
-        debug!("Party {party_id}: Commit and commit pk shared.");
-    }
 
     // --- RGSW + External Product ---
     let mut rotate_ggsw: DcrtGgsw<Vec<CrtValueT>> = DcrtGgsw::zero(rns_ggsw_len);
@@ -343,15 +331,14 @@ fn party_operation(
 
     let mut acc: CrtGlwe<Vec<CrtValueT>> = party.generate_init_acc();
 
-    if party_id == 0 {
-        debug!("Party {party_id}: Start generate RGSW.");
-    }
     party.generate_rotate_rgsw_inplace(degree, &mut rotate_ggsw, rng);
-    party.share_v3(&rotate_ggsw, all_rotate_ggsw.as_mut_slice());
-
     if party_id == 0 {
-        debug!("Party {party_id}: Start aggregate all randomness.");
+        debug!(
+            "[Round 1/4] Share RGSW, external product & coefficient expansion \
+             (Alg.2 lines 14-15, 20-22; §4.2 GenInstance + §4.3.1 ParElect)"
+        );
     }
+    party.share_v3(&rotate_ggsw, all_rotate_ggsw.as_mut_slice());
 
     let mut ex_product_glwe: DcrtGlwe<Vec<CrtValueT>> = DcrtGlwe::zero(rns_glwe_len);
     protocol::external_product_chain(
@@ -366,10 +353,6 @@ fn party_operation(
 
     // --- Coefficient Expansion ---
     let mut selectors = vec![DcrtGlwe::zero(rns_glwe_len); party_count];
-
-    if party_id == 0 {
-        debug!("Party {party_id}: Start generate Selectors.");
-    }
 
     #[cfg(not(feature = "parallel"))]
     protocol::expand_selectors(
@@ -392,10 +375,6 @@ fn party_operation(
     );
 
     // --- Re-randomize Commits ---
-    if party_id == 0 {
-        debug!("Party {party_id}: Start re-randomize commit.");
-    }
-
     for (commit, commit_pk, rr_commit) in izip!(
         all_commit.iter(),
         all_commit_pk.iter(),
@@ -416,10 +395,6 @@ fn party_operation(
     let mut msg: DcrtPolynomial<Vec<CrtValueT>> = DcrtPolynomial::zero(rns_poly_len);
     let mut encode_commits: Vec<CrtValueT> = vec![0; rns_glwe_len * 2];
     let mut all_encode_commits: Vec<CrtValueT> = vec![0; rns_glwe_len * 2 * party_count];
-
-    if party_id == 0 {
-        debug!("Party {party_id}: Start encode randomized commits.");
-    }
 
     let commit_modulus_val = CommitModulus.value_unchecked().as_into();
     let cipher_moduli = ring_params.cipher_moduli();
@@ -442,7 +417,13 @@ fn party_operation(
         );
     }
 
-    // --- Round 1 final: share & aggregate encoded commits ---
+    // --- Share & aggregate encoded commits ---
+    if party_id == 0 {
+        debug!(
+            "[Round 2/4] Share encoded commits & aggregate \
+             (Alg.2 lines 24-28, 31-32; §4.3.1 ParElect + §4.3.2 Elect)"
+        );
+    }
     party.share_v2(encode_commits.as_ref(), all_encode_commits.as_mut());
 
     let mut final_encode_commits: Vec<CrtValueT> = vec![0; rns_glwe_len * 2];
@@ -455,11 +436,7 @@ fn party_operation(
         cipher_moduli,
     );
 
-    // --- Distributed Decryption ---
-    if party_id == 0 {
-        debug!("Party {party_id}: Start distributed decryption.");
-    }
-
+    // --- Distributed Decryption (local computation) ---
     let rns_base = ring_params.base_q();
 
     let mut dec_share: Vec<CrtValueT> = vec![0; rns_poly_len * 2];
@@ -533,7 +510,13 @@ fn party_operation(
         }
     }
 
-    // --- Round 2, step 1: share e-shares → Party 0 aggregates ---
+    // --- Share e-shares → Party 0 aggregates ---
+    if party_id == 0 {
+        debug!(
+            "[Round 3/4] Share e-shares → Party 0 aggregate & center \
+             (Ajax 2025/1834 Fig.10 steps 1-2; Alg.2 lines 33-34, §4.3.2 Elect)"
+        );
+    }
     if party_id == 0 {
         party.share_to_p0(&e_shares, Some(&mut all_e_shares));
     } else {
@@ -611,7 +594,13 @@ fn party_operation(
         }
     }
 
-    // --- Round 2, step 2: share & aggregate value shares ---
+    // --- Share & aggregate value shares ---
+    if party_id == 0 {
+        debug!(
+            "[Round 4/4] Share value shares → Combine \
+             (Ajax 2025/1834 Fig.10 steps 3-4; Alg.2 lines 36-38, §4.4 Combine)"
+        );
+    }
     let mut all_big_uint_dec_share: Vec<CrtValueT> = vec![0; big_uint_poly_len * 2 * party_count];
     party.share_v2(&big_uint_dec_share, &mut all_big_uint_dec_share);
 
@@ -654,7 +643,10 @@ fn party_operation(
 
     // --- Verification ---
     if party_id == 0 {
-        debug!("Party {party_id}: Start verifying.");
+        debug!(
+            "[Final] Verification — div_v, decode, decrypt \
+             (Alg.2 lines 39-43, §4.5 Verify)"
+        );
     }
 
     final_commit
@@ -677,7 +669,7 @@ fn party_operation(
     let is_leader = msgs.iter().all(|&v| v == 0);
 
     if is_leader {
-        info!("Party {party_id}: I'm leader!",);
+        info!("✓ Result: party {party_id} elected as leader");
     }
 
     degree
@@ -686,7 +678,6 @@ fn party_operation(
 /// Collect each party's random degree, sum modulo party_count → elected leader.
 fn check_result(party_count: usize, threads: Vec<std::thread::JoinHandle<usize>>) {
     let degrees: Vec<usize> = threads.into_iter().map(|h| h.join().unwrap()).collect();
-    let sum = degrees.into_iter().sum::<usize>();
-    let leader = sum % party_count;
-    info!("leader: {leader}\n");
+    let leader = degrees.into_iter().sum::<usize>() % party_count;
+    info!("All parties agree: leader is party {leader}");
 }

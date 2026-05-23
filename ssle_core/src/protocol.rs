@@ -723,11 +723,13 @@ pub struct PhaseTimings {
 ///   2. **Coefficient expansion** (§4.3.1, Alg.2 line 22):
 ///      {sel_i} ← PartialObliviousExpand(ct, G)
 ///
-///   3. **Commit re-randomization & encoding** (§4.3.1, Alg.2 lines 24-28):
+///   3. **Commit re-randomization, encoding & aggregation**
+///      (§4.3.1 ParElect lines 24-28 + §4.3.2 Elect lines 31-32):
 ///      com_{i,k} ← com_i + RLWE.Enc(pk_i, 0); parta += sel_i ⊙ a_{i,k}; ...
+///      then parta = Σ parta_i, partb = Σ partb_i
 ///
 ///   4. **Distributed decryption** (Ajax 2025/1834 "mask-then-open", Fig.10;
-///      instantiates Relect Alg.2 lines 30-38, §4.3.2 + §4.4):
+///      instantiates Relect Alg.2 lines 33-38, §4.3.2 Elect + §4.4 Combine):
 ///      PartialDec with msk_i; masked share; open e+r; Combine → (v·a_r, v·b_r)
 ///
 ///   5. **Verification** (§4.5 Verify, Alg.2 lines 39-43):
@@ -944,9 +946,10 @@ pub fn run_compute_time_protocol(
 
     let expand_partial_coefficients_end = Instant::now();
 
-    // ===== Phase 3/5: Commit Re-randomization & Encoding (§4.3.1, Alg.2 lines 24-28) =====
-    // For each party: com_{i,k} ← com_i + RLWE.Enc(pk_i, 0) (re-randomize)
-    // then parta += sel_i ⊙ a_{i,k}, partb += sel_i ⊙ b_{i,k} (encode)
+    // ===== Phase 3/5: Commit Re-randomization & Encoding =====
+    // (§4.3.1 ParElect lines 24-28: com_{i,k} ← com_i + RLWE.Enc(pk_i, 0),
+    //  parta += sel_i ⊙ a_{i,k}, partb += sel_i ⊙ b_{i,k};
+    //  + §4.3.2 Elect lines 31-32: aggregate parta = Σ parta_i, partb = Σ partb_i)
     debug!("[Phase 3/5] Commit re-randomization, encoding & aggregation");
     for (commit, commit_pk, rr_commit) in izip!(
         all_commit.iter(),
@@ -998,10 +1001,11 @@ pub fn run_compute_time_protocol(
     let phase1_end = Instant::now();
 
     // ===== Phase 4/5: Distributed Decryption =====
-    // "Mask-then-open" protocol from Ajax (2025/1834, Fig.10), instantiating
-    // the PartialDec + Combine steps of Relect (Alg.2 lines 33-38, §4.3.2+§4.4).
+    // "Mask-then-open" from Ajax (2025/1834, Fig.10), instantiating
+    // Relect §4.3.2 Elect (Alg.2 lines 33-35: PartialDec) +
+    // §4.4 Combine (Alg.2 lines 36-38: ThFHE.Combine).
     // Each party: phase → INTT → RNS compose → scale-round → mask with randoms.
-    // Party 0 opens e+r, centers, and subtracts e from value → recovers Δ·m.
+    // Party 0 opens e+r, centers, subtracts e from value → recovers Δ·m.
     debug!(
         "[Phase 4/5] Distributed decryption — {} parties computing shares",
         party_count
