@@ -52,10 +52,10 @@ for t in "${RAW[@]}"; do
 done
 
 # Normalize toolchain prefix
-CARGO_TC=()
+CARGO_TC=""
 if [ -n "$TOOLCHAIN_ARG" ]; then
     [[ "$TOOLCHAIN_ARG" != +* ]] && TOOLCHAIN_ARG="+$TOOLCHAIN_ARG"
-    CARGO_TC=("$TOOLCHAIN_ARG")
+    CARGO_TC="$TOOLCHAIN_ARG"
 fi
 
 # --- System tuning for consistent benchmarks ---
@@ -83,7 +83,7 @@ TIMESTAMP=$(date +%Y%m%d_%H%M)
 
 # Result file tag (append _nightly / _simd as needed)
 RESULT_TAG="$TIMESTAMP"
-if [ ${#CARGO_TC[@]} -gt 0 ] && [[ "${CARGO_TC[0]}" == *nightly* ]]; then
+if [ -n "$CARGO_TC" ] && [[ "$CARGO_TC" == *nightly* ]]; then
     RESULT_TAG="${TIMESTAMP}_nightly"
 fi
 if [ "$SIMD" = true ]; then
@@ -96,10 +96,10 @@ BUILD_LOG="$OUTPUT_DIR/build_log.txt"
 echo "Results: ${OUTPUT_DIR}/${RESULT_TAG}_t*.txt"
 echo "Build log: $BUILD_LOG"
 echo "Threads: ${THREADS[*]}"
-if [ ${#CARGO_TC[@]} -eq 0 ]; then
+if [ -z "$CARGO_TC" ]; then
     echo "Toolchain: default"
 else
-    echo "Toolchain: ${CARGO_TC[0]}"
+    echo "Toolchain: $CARGO_TC"
 fi
 echo "SIMD: $SIMD"
 
@@ -150,7 +150,7 @@ for block in "${BLOCKS[@]}"; do
         # Rebuild only when features change
         if [ "$features" != "$LAST_FEATURES" ]; then
             echo "Rebuilding (features: $LAST_FEATURES -> $features)..." | tee -a "$OUTFILE"
-            cargo "${CARGO_TC[@]}" build --quiet --release \
+            cargo $CARGO_TC build --quiet --release \
                 --package ssle_core \
                 --example "$example" \
                 --features="$features" >> "$BUILD_LOG"
