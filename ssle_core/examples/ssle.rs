@@ -159,10 +159,10 @@ fn check_args(args: Args) -> (usize, usize, SsleParameters) {
 
 fn main() {
     tracing_subscriber::fmt()
-        .compact()
         .with_span_events(FmtSpan::CLOSE)
-        .with_thread_ids(true)
+        .with_target(false)
         .with_max_level(Level::DEBUG)
+        .with_timer(())
         .init();
     let args = Args::parse();
 

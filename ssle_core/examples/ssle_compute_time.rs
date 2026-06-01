@@ -169,13 +169,14 @@ fn check_args(args: Args) -> (usize, usize, SsleParameters) {
 
 fn main() {
     tracing_subscriber::fmt()
-        .compact()
         .with_span_events(FmtSpan::CLOSE)
+        .with_target(false)
         .with_env_filter(
             EnvFilter::builder()
                 .with_default_directive(LevelFilter::DEBUG.into())
                 .from_env_lossy(),
         )
+        .with_timer(())
         .init();
 
     let args = Args::parse();
