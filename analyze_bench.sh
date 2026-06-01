@@ -38,13 +38,13 @@ if [ ! -f "$input_file" ]; then
     exit 1
 fi
 
-# --- Check for awk (requires gawk for the 3-argument match() function) ---
 if ! command -v awk >/dev/null 2>&1; then
     echo "awk not found" >&2
     exit 1
 fi
 
 # --- Parse the benchmark output with awk ---
+# Uses portable (POSIX) awk syntax — works with both BSD awk (macOS) and GNU awk.
 awk '
 # Convert a time value with unit to milliseconds
 function to_ms(value, unit) {
@@ -58,25 +58,41 @@ function to_ms(value, unit) {
 }
 
 # Detect party count section header, e.g. "--- Testing p=4 ---"
-match($0, /--- Testing p=([0-9]+)/, p_match) {
-    current_p = p_match[1]
+match($0, /--- Testing p=[0-9]+/) {
+    s = substr($0, RSTART, RLENGTH)
+    sub(/.*=/, "", s)
+    current_p = s + 0
     seen[current_p] = 1
     next
 }
 
 # Detect thread count from result file header
-thread_count == "" && match($0, /Results for thread count t=([0-9]+)/, thread_match) {
-    thread_count = thread_match[1]
+thread_count == "" && match($0, /Results for thread count t=[0-9]+/) {
+    s = substr($0, RSTART, RLENGTH)
+    sub(/.*=/, "", s)
+    thread_count = s + 0
     next
 }
 
 # Extract all_compute elapsed time, e.g. "| all_compute        | 1.234 ms |"
-current_p != "" && match($0, /\|[[:space:]]*all_compute[[:space:]]*\|[[:space:]]*([0-9]+(\.[0-9]+)?)[[:space:]]*(ns|us|µs|μs|ms|s)[[:space:]]*\|/, time_match) {
-    v = to_ms(time_match[1] + 0.0, time_match[3])
-    sums[current_p]   += v
-    counts[current_p] += 1
-    idx[current_p]++
-    vals[current_p, idx[current_p]] = v
+current_p != "" && /all_compute/ {
+    nf = split($0, parts, "|")
+    if (nf >= 3) {
+        val = parts[3]
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", val)
+        if (match(val, /[0-9]+\.?[0-9]*/)) {
+            num = substr(val, RSTART, RLENGTH) + 0.0
+            unit = substr(val, RSTART + RLENGTH)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", unit)
+            if (unit != "") {
+                v = to_ms(num, unit)
+                sums[current_p]   += v
+                counts[current_p] += 1
+                idx[current_p]++
+                vals[current_p, idx[current_p]] = v
+            }
+        }
+    }
 }
 
 END {
