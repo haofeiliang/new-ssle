@@ -16,13 +16,18 @@
 //!
 //! # Usage
 //! ```text
+//! // stable toolchain (default):
 //! cargo run --release --package ssle_core --example ssle -- -p 4
 //! cargo run --release --package ssle_core --example ssle --features="gt16" -- -p 64
 //! cargo run --release --package ssle_core --example ssle --features="gt128" -- -p 256
-//! // with parallelism:
+//! // with parallelism (-t threads per party):
 //! cargo run --release --package ssle_core --example ssle --features="parallel" -- -p 4 -t 2
 //! cargo run --release --package ssle_core --example ssle --features="gt16 parallel" -- -p 64 -t 8
 //! cargo run --release --package ssle_core --example ssle --features="gt128 parallel" -- -p 256 -t 16
+//! // nightly toolchain with SIMD:
+//! cargo +nightly run --release --package ssle_core --example ssle --features="simd" -- -p 4
+//! cargo +nightly run --release --package ssle_core --example ssle --features="gt16 simd" -- -p 64
+//! cargo +nightly run --release --package ssle_core --example ssle --features="gt128 simd" -- -p 256
 //! ```
 
 use std::{hint::cold_path, sync::Arc};

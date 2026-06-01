@@ -1,9 +1,10 @@
-//! # SSLE Compute-Time Benchmark (single-party simulation)
+//! # SSLE Compute-Time Benchmark
 //!
-//! Simulates the complete SSLE protocol with `party_count` parties **in a single
-//! thread**, measuring only computation time (no network I/O). Each party's work
-//! is performed sequentially in local arrays, and the protocol's internal
-//! per-phase timings are reported.
+//! Measures the computation time of the SSLE protocol (no network I/O).
+//! Only party 0 runs the full SSLE protocol
+//! path and is timed; other parties contribute pre-computed or placeholder
+//! values so that the aggregation steps can proceed. All reported timings
+//! reflect **party 0's computation only**.
 //!
 //! This example corresponds to the full protocol in **paper §4, Algorithm 2**.
 //! The communication size estimation at the end computes the concrete bandwidth
@@ -17,15 +18,31 @@
 //! | 32 ..= 128  | `gt16`         |
 //! | 256 ..= 2048| `gt128`        |
 //!
+//! Note: for `party_count >= 256`, the `ssle_ge_256_compute_time_improve`
+//! example (which caps the RGSW count at 128) is preferred.
+//!
 //! # Usage
+//!
 //! ```text
+//! // stable toolchain (default):
 //! cargo run --release --package ssle_core --example ssle_compute_time -- -p 4
 //! cargo run --release --package ssle_core --example ssle_compute_time --features="gt16" -- -p 64
 //! cargo run --release --package ssle_core --example ssle_compute_time --features="gt128" -- -p 256
-//! // with parallelism (one thread per simulated party):
+//! // with parallelism (`-t` rayon threads for party 0's computation):
 //! cargo run --release --package ssle_core --example ssle_compute_time --features="parallel" -- -p 4 -t 4
 //! cargo run --release --package ssle_core --example ssle_compute_time --features="gt16 parallel" -- -p 64 -t 8
 //! cargo run --release --package ssle_core --example ssle_compute_time --features="gt128 parallel" -- -p 256 -t 8
+//! // nightly toolchain with SIMD (as used in paper benchmarks):
+//! cargo +nightly run --release --package ssle_core --example ssle_compute_time --features="simd" -- -p 4
+//! cargo +nightly run --release --package ssle_core --example ssle_compute_time --features="gt16 simd" -- -p 64
+//! cargo +nightly run --release --package ssle_core --example ssle_compute_time --features="gt128 simd" -- -p 256
+//! // nightly + parallelism + SIMD:
+//! cargo +nightly run --release --package ssle_core --example ssle_compute_time --features="parallel simd" -- -p 4 -t 4
+//! ```
+//!
+//! Paper benchmarks were collected via:
+//! ```text
+//! bash run_bench.sh -c nightly -s
 //! ```
 
 use std::{sync::Arc, time::Duration};
@@ -76,7 +93,7 @@ struct TimeInfo {
 
 #[derive(Parser)]
 struct Args {
-    /// thread count per party
+    /// rayon thread count for party 0 (requires `parallel` feature)
     #[arg(short = 't', long)]
     thread_count: Option<usize>,
     /// party count

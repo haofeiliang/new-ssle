@@ -1,7 +1,10 @@
 //! # SSLE Compute-Time Benchmark — optimized for large party counts
 //!
-//! Same single-party simulation as `ssle_compute_time`, but with the RGSW
-//! count **fixed at 128** instead of scaling with `party_count`.
+//! Same approach as `ssle_compute_time`, but with the RGSW
+//! count **fixed at 128** instead of scaling with `party_count`. Only party 0
+//! runs the full SSLE protocol path and is timed; other parties contribute
+//! pre-computed or placeholder values. All timings reflect party 0's
+//! computation.
 //!
 //! **Why this is valid**: by honest majority, a random subset of κ parties
 //! (here κ = 128) suffices to guarantee at least one honest party contributes
@@ -12,8 +15,17 @@
 //!
 //! # Usage
 //! ```text
+//! // stable toolchain (default):
 //! cargo run --release --package ssle_core --example ssle_ge_256_compute_time_improve --features="gt128" -- -p 256
 //! cargo run --release --package ssle_core --example ssle_ge_256_compute_time_improve --features="gt128 parallel" -- -p 256 -t 16
+//! // nightly toolchain with SIMD (as used in paper benchmarks):
+//! cargo +nightly run --release --package ssle_core --example ssle_ge_256_compute_time_improve --features="gt128 simd" -- -p 256
+//! cargo +nightly run --release --package ssle_core --example ssle_ge_256_compute_time_improve --features="gt128 parallel simd" -- -p 256 -t 16
+//! ```
+//!
+//! Paper benchmarks were collected via:
+//! ```text
+//! bash run_bench.sh -c nightly -s
 //! ```
 
 use std::{sync::Arc, time::Duration};
@@ -65,7 +77,7 @@ struct TimeInfo {
 
 #[derive(Parser)]
 struct Args {
-    /// thread count per party
+    /// rayon thread count for party 0 (requires `parallel` feature)
     #[arg(short = 't', long)]
     thread_count: Option<usize>,
     /// party count
