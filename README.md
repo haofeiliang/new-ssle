@@ -76,6 +76,7 @@ Two toolchains are needed:
 | **nightly** | Benchmark with SIMD (`run_bench.ps1 -c nightly -s`). Tested on 1.97.0-nightly. |
 
 Install Rust via <https://rustup.rs>:
+
 - **Windows**: download and run `rustup-init.exe`.
 - **Linux / macOS**: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 
@@ -137,9 +138,7 @@ To see only key results, set `RUST_LOG=info`:
 RUST_LOG=info cargo run --release --package ssle_core --example ssle_compute_time -- -p 4
 ```
 
-Each `[Phase X/5]` log line matches a step in Algorithm 2 of the paper. Phase 4
-(distributed decryption) follows the protocol from Ajax (ePrint
-[2025/1834](https://eprint.iacr.org/2025/1834), §4.3, Fig. 10).
+Each `[Phase X/5]` log line matches a step in Algorithm 2 of the paper. Phase 4 (distributed decryption) follows the protocol from Ajax (ePrint [2025/1834](https://eprint.iacr.org/2025/1834), §4.3, Fig. 10).
 
 ## Examples
 
@@ -169,8 +168,7 @@ Expected output:
 
 ### `ssle_compute_time` — FHE computation time, $G \leq 128$
 
-Measures only computation time (no network I/O). Reports per-phase timing and
-communication cost estimates.
+Measures only computation time (no network I/O). Reports per-phase timing and communication cost estimates.
 
 ```bash
 cargo run --release --package ssle_core --example ssle_compute_time -- -p 4
@@ -221,8 +219,7 @@ Expected output:
 
 ### `ssle_ge_256_compute_time_improve` — FHE computation time, $G \geq 256$
 
-Same as above but uses only 128 RGSW ciphertexts regardless of party count
-(subset sampling, paper §2.5).
+Same as above but uses only 128 RGSW ciphertexts regardless of party count (subset sampling, paper §2.5).
 
 ```bash
 cargo run --release --package ssle_core --example ssle_ge_256_compute_time_improve --features="gt128" -- -p 256
@@ -264,8 +261,7 @@ Expected output:
 
 ## Reproducing paper benchmarks
 
-The paper's compute-time results were collected using the **nightly** toolchain and
-**SIMD** feature:
+The paper's compute-time results were collected using the **nightly** toolchain and **SIMD** feature:
 
 ```powershell
 # Windows (PowerShell)
@@ -277,8 +273,7 @@ The paper's compute-time results were collected using the **nightly** toolchain 
 bash run_bench.sh -c nightly -s
 ```
 
-This runs the benchmarks for all party counts (G = 2..2048, 5 repetitions each)
-and writes results to `results/`. For a quick single-point test:
+This runs the benchmarks for all party counts (G = 2..2048, 5 repetitions each) and writes results to `results/`. For a quick single-point test:
 
 ```powershell
 cargo +nightly run --release --package ssle_core --example ssle_compute_time --features="simd" -- -p 128
@@ -296,5 +291,4 @@ cargo +nightly run --release --package ssle_core --example ssle_compute_time --f
 ## Notes
 
 - The `ssle` example spawns one OS thread per party and communicates over TCP on `localhost`. Ensure port range `30000..30000+party_count` is available.
-- Benchmark scripts turn off log output during runs (`RUST_LOG=off`) to keep
-  result files clean. Running examples manually is not affected.
+- Benchmark scripts turn off log output during runs (`RUST_LOG=off`) to keep result files clean. Running examples manually is not affected.
