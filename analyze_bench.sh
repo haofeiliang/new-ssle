@@ -89,11 +89,6 @@ END {
         scheme = sprintf("Relect(%d threads)", thread_count)
     }
 
-    if (!data_only) {
-        print "Input: " input_file
-        print "scheme, party_count, avg_all_compute_ms"
-    }
-
     # Collect party counts that have results, then sort them numerically
     found = 0
     for (p in seen) {
@@ -119,17 +114,26 @@ END {
         }
     }
 
-    # Output sorted CSV results
-    for (i = 1; i <= n; i++) {
-        p = ordered[i]
-        printf "%s, %d, %.6f\n", scheme, p, sums[p] / counts[p]
+    # --- CSV Output (suppressed when --stats is used) ---
+    if (!stats) {
+        if (!data_only) {
+            print "Input: " input_file
+            print "scheme, party_count, avg_all_compute_ms"
+        }
+
+        for (i = 1; i <= n; i++) {
+            p = ordered[i]
+            printf "%s, %d, %.6f\n", scheme, p, sums[p] / counts[p]
+        }
     }
 
     # --- Statistics table (optional) ---
     if (stats) {
-        printf "\n"
-        print "--- Statistics ---"
-        print "scheme, party_count, runs, avg_ms, stddev_ms, min_ms, max_ms"
+        if (!data_only) {
+            printf "\n"
+            print "--- Statistics ---"
+            print "scheme, party_count, runs, avg_ms, stddev_ms, min_ms, max_ms"
+        }
 
         for (i = 1; i <= n; i++) {
             p = ordered[i]

@@ -82,7 +82,6 @@ if ($PartyStats.Count -eq 0) {
 }
 
 # --- Scheme name ---
-# Single-threaded = "Relect"; multi-threaded = "Relect(N threads)"
 if ($null -eq $ThreadCount) {
     $ThreadCount = 1
 }
@@ -94,25 +93,29 @@ else {
     $Scheme = "Relect($ThreadCount threads)"
 }
 
-# --- CSV Output (always) ---
-if (-not $DataOnly) {
-    "Input: $InputFile"
-    "scheme, party_count, avg_all_compute_ms"
-}
+# --- CSV Output (suppressed when -Stats is used) ---
+if (-not $Stats) {
+    if (-not $DataOnly) {
+        "Input: $InputFile"
+        "scheme, party_count, avg_all_compute_ms"
+    }
 
-foreach ($P in ($PartyStats.Keys | Sort-Object {[int]$_})) {
-    $Item = $PartyStats[$P]
-    if ($Item.Count -gt 0) {
-        $AverageMs = $Item.SumMs / $Item.Count
-        "{0}, {1}, {2}" -f $Scheme, $P, $AverageMs.ToString("F6", $InvariantCulture)
+    foreach ($P in ($PartyStats.Keys | Sort-Object {[int]$_})) {
+        $Item = $PartyStats[$P]
+        if ($Item.Count -gt 0) {
+            $AverageMs = $Item.SumMs / $Item.Count
+            "{0}, {1}, {2}" -f $Scheme, $P, $AverageMs.ToString("F6", $InvariantCulture)
+        }
     }
 }
 
 # --- Statistics Table (optional) ---
 if ($Stats) {
-    ""
-    "--- Statistics ---"
-    "scheme, party_count, runs, avg_ms, stddev_ms, min_ms, max_ms"
+    if (-not $DataOnly) {
+        ""
+        "--- Statistics ---"
+        "scheme, party_count, runs, avg_ms, stddev_ms, min_ms, max_ms"
+    }
 
     foreach ($P in ($PartyStats.Keys | Sort-Object {[int]$_})) {
         $Item = $PartyStats[$P]

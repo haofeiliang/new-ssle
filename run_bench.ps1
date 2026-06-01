@@ -222,10 +222,26 @@ if (-not (Test-Path -LiteralPath $AnalyzeScript -PathType Leaf)) {
     throw "Analyze script not found: $AnalyzeScript"
 }
 
+# When multiple thread counts are configured, label single-threaded as "Relect(1 thread)"
+# so it's visually consistent with "Relect(N threads)".
+$MultiThread = $Threads.Count -gt 1
+
 Write-Host ""
 Write-Host "Average all_compute time:"
 Write-Host "scheme, party_count, avg_all_compute_ms"
 foreach ($t in $Threads) {
     $OutFile = Join-Path $OutputDir "${ResultTag}_t${t}.txt"
-    & $AnalyzeScript $OutFile -DataOnly -Stats
+    & $AnalyzeScript $OutFile -DataOnly | ForEach-Object {
+        if ($MultiThread) { $_ -replace '^Relect,', 'Relect(1 thread),' } else { $_ }
+    }
+}
+
+Write-Host ""
+Write-Host "--- Statistics ---"
+Write-Host "scheme, party_count, runs, avg_ms, stddev_ms, min_ms, max_ms"
+foreach ($t in $Threads) {
+    $OutFile = Join-Path $OutputDir "${ResultTag}_t${t}.txt"
+    & $AnalyzeScript $OutFile -DataOnly -Stats | ForEach-Object {
+        if ($MultiThread) { $_ -replace '^Relect,', 'Relect(1 thread),' } else { $_ }
+    }
 }

@@ -14,17 +14,17 @@ indicatif = { version = "0.18", features = ["rayon"] }
 mimalloc = "0.1"
 tracing = "0.1"
 
-primus_integer = { path = "../primus/primus_integer" }
-primus_reduce = { path = "../primus/primus_reduce" }
-primus_modulus = { path = "../primus/primus_modulus" }
-primus_factor = { path = "../primus/primus_factor" }
-primus_poly = { path = "../primus/primus_poly" }
-primus_distr = { path = "../primus/primus_distr" }
-primus_decompose = { path = "../primus/primus_decompose" }
-primus_ntt = { path = "../primus/primus_ntt" }
-primus_rns = { path = "../primus/primus_rns" }
-primus_lattice = { path = "../primus/primus_lattice" }
-primus_fhe_core = { path = "../primus/primus_fhe_core" }
+primus_integer = { git = "https://github.com/haofeiliang/primus.git", branch = "archive/main" }
+primus_reduce = { git = "https://github.com/haofeiliang/primus.git", branch = "archive/main" }
+primus_modulus = { git = "https://github.com/haofeiliang/primus.git", branch = "archive/main" }
+primus_factor = { git = "https://github.com/haofeiliang/primus.git", branch = "archive/main" }
+primus_poly = { git = "https://github.com/haofeiliang/primus.git", branch = "archive/main" }
+primus_distr = { git = "https://github.com/haofeiliang/primus.git", branch = "archive/main" }
+primus_decompose = { git = "https://github.com/haofeiliang/primus.git", branch = "archive/main" }
+primus_ntt = { git = "https://github.com/haofeiliang/primus.git", branch = "archive/main" }
+primus_rns = { git = "https://github.com/haofeiliang/primus.git", branch = "archive/main" }
+primus_lattice = { git = "https://github.com/haofeiliang/primus.git", branch = "archive/main" }
+primus_fhe_core = { git = "https://github.com/haofeiliang/primus.git", branch = "archive/main" }
 
 
 [profile.dev]

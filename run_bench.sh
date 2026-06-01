@@ -197,9 +197,29 @@ if [ ! -f "$ANALYZE_SCRIPT" ]; then
     exit 1
 fi
 
+# When multiple thread counts are configured, label single-threaded as "Relect(1 thread)"
+# so it's visually consistent with "Relect(N threads)".
+MULTI_THREAD=0
+[ ${#THREADS[@]} -gt 1 ] && MULTI_THREAD=1
+
 echo
 echo "Average all_compute time:"
 echo "scheme, party_count, avg_all_compute_ms"
 for t in "${THREADS[@]}"; do
-    bash "$ANALYZE_SCRIPT" "${OUTPUT_DIR}/${RESULT_TAG}_t${t}.txt" --data-only --stats
+    if [ "$MULTI_THREAD" -eq 1 ]; then
+        bash "$ANALYZE_SCRIPT" "${OUTPUT_DIR}/${RESULT_TAG}_t${t}.txt" --data-only | sed 's/^Relect,/Relect(1 thread),/'
+    else
+        bash "$ANALYZE_SCRIPT" "${OUTPUT_DIR}/${RESULT_TAG}_t${t}.txt" --data-only
+    fi
+done
+
+echo
+echo "--- Statistics ---"
+echo "scheme, party_count, runs, avg_ms, stddev_ms, min_ms, max_ms"
+for t in "${THREADS[@]}"; do
+    if [ "$MULTI_THREAD" -eq 1 ]; then
+        bash "$ANALYZE_SCRIPT" "${OUTPUT_DIR}/${RESULT_TAG}_t${t}.txt" --data-only --stats | sed 's/^Relect,/Relect(1 thread),/'
+    else
+        bash "$ANALYZE_SCRIPT" "${OUTPUT_DIR}/${RESULT_TAG}_t${t}.txt" --data-only --stats
+    fi
 done
