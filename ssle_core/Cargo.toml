@@ -24,6 +24,7 @@ bytemuck = { workspace = true }
 bytes = { workspace = true }
 num = { version = "0.4.3", features = ["rand"] }
 tracing = { workspace = true }
+rayon = { workspace = true, optional = true }
 
 [dev-dependencies]
 mimalloc = { workspace = true }
@@ -46,7 +47,7 @@ tracing-subscriber = { version = "0.3", features = [
 [features]
 gt16 = []
 gt128 = []
-parallel = []
+parallel = ["dep:rayon"]
 simd = [
     "primus_integer/simd",
     "primus_modulus/simd",

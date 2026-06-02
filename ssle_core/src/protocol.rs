@@ -22,6 +22,9 @@ use primus_rns::RNSBase;
 use rand::RngExt;
 use tracing::{debug, info};
 
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+
 use crate::{
     CoefficientExpansionKey, CommitModulus, CommitTable, CommitValueT, CrtTable, CrtValueT,
     MasterPublicKey, MasterSecretKey, MasterSecretKeyShare, add_mod_u128, biguint_to_u128,
@@ -951,40 +954,120 @@ pub fn run_compute_time_protocol(
     //  parta += sel_i ⊙ a_{i,k}, partb += sel_i ⊙ b_{i,k};
     //  + §4.3.2 Elect lines 31-32: aggregate parta = Σ parta_i, partb = Σ partb_i)
     debug!("[Phase 3/5] Commit re-randomization, encoding & aggregation");
-    for (commit, commit_pk, rr_commit) in izip!(
-        all_commit.iter(),
-        all_commit_pk.iter(),
-        all_rr_commit.iter_mut(),
-    ) {
-        rerandomize_commit(
-            commit,
-            commit_pk,
-            rr_commit,
-            commit_params,
-            &commit_ntt_table,
-            rng,
-        );
-    }
 
     let commit_modulus_val = CommitModulus.value_unchecked().as_into();
     let cipher_moduli = ring_params.cipher_moduli();
 
-    let (enc_a, enc_b) = encode_commits.split_at_mut(rns_glwe_len);
-    for (selector, rr_commit) in selectors.iter().zip(all_rr_commit.iter()) {
-        encode_single_commit(
-            selector,
-            rr_commit,
-            enc_a,
-            enc_b,
-            &mut temp,
-            &mut msg,
-            commit_poly_length,
-            ring_poly_length,
-            base_q,
-            commit_modulus_val,
-            table,
-            cipher_moduli,
-        );
+    // The sequential path is shared between:
+    //  - #[cfg(not(feature = "parallel"))]  (parallel never enabled)
+    //  - #[cfg(feature = "parallel")] + party_count < 256  (small G, overhead > benefit)
+    macro_rules! sequential_encode {
+        () => {
+            for (commit, commit_pk, rr_commit) in izip!(
+                all_commit.iter(),
+                all_commit_pk.iter(),
+                all_rr_commit.iter_mut(),
+            ) {
+                rerandomize_commit(
+                    commit,
+                    commit_pk,
+                    rr_commit,
+                    commit_params,
+                    &commit_ntt_table,
+                    rng,
+                );
+            }
+
+            let (enc_a, enc_b) = encode_commits.split_at_mut(rns_glwe_len);
+            for (selector, rr_commit) in selectors.iter().zip(all_rr_commit.iter()) {
+                encode_single_commit(
+                    selector,
+                    rr_commit,
+                    enc_a,
+                    enc_b,
+                    &mut temp,
+                    &mut msg,
+                    commit_poly_length,
+                    ring_poly_length,
+                    base_q,
+                    commit_modulus_val,
+                    table,
+                    cipher_moduli,
+                );
+            }
+        };
+    }
+
+    #[cfg(feature = "parallel")]
+    if party_count >= 256 {
+        // Parallel re-randomization (each party's commit is independent)
+        all_rr_commit
+            .par_iter_mut()
+            .zip(all_commit.par_iter())
+            .zip(all_commit_pk.par_iter())
+            .for_each(|((rr_commit, commit), commit_pk)| {
+                let rng = &mut rand::rng();
+                rerandomize_commit(
+                    commit,
+                    commit_pk,
+                    rr_commit,
+                    commit_params,
+                    &commit_ntt_table,
+                    rng,
+                );
+            });
+
+        // Parallel encoding with per-thread partial accumulators + reduction
+        let (enc_a, enc_b) = encode_commits.split_at_mut(rns_glwe_len);
+        let num_threads = rayon::current_num_threads();
+        let chunk_size = (party_count + num_threads - 1) / num_threads;
+
+        let partials: Vec<_> = selectors
+            .par_chunks(chunk_size)
+            .zip(all_rr_commit.par_chunks(chunk_size))
+            .map(|(sel_chunk, rr_chunk)| {
+                let mut lo_a = vec![0u64; rns_glwe_len];
+                let mut lo_b = vec![0u64; rns_glwe_len];
+                let mut lo_temp = vec![0u64; ring_poly_length];
+                let mut lo_msg = DcrtPolynomial::zero(rns_poly_len);
+                for (selector, rr_commit) in sel_chunk.iter().zip(rr_chunk.iter()) {
+                    encode_single_commit(
+                        selector,
+                        rr_commit,
+                        &mut lo_a,
+                        &mut lo_b,
+                        &mut lo_temp,
+                        &mut lo_msg,
+                        commit_poly_length,
+                        ring_poly_length,
+                        base_q,
+                        commit_modulus_val,
+                        table,
+                        cipher_moduli,
+                    );
+                }
+                (lo_a, lo_b)
+            })
+            .collect();
+
+        // Reduce partial accumulators into enc_a / enc_b
+        for (lo_a, lo_b) in partials {
+            enc_a
+                .iter_mut()
+                .zip(lo_a.iter())
+                .for_each(|(a, &la)| *a += la);
+            enc_b
+                .iter_mut()
+                .zip(lo_b.iter())
+                .for_each(|(b, &lb)| *b += lb);
+        }
+    } else {
+        sequential_encode!();
+    }
+
+    #[cfg(not(feature = "parallel"))]
+    {
+        sequential_encode!();
     }
 
     let encode_mid = Instant::now();
