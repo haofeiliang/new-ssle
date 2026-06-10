@@ -1,9 +1,5 @@
 # Relect
 
-## License
-
-Relect is dual-licensed under MIT or Apache-2.0. See `LICENSE-MIT` and `LICENSE-APACHE-2.0`.
-
 ## Abstract
 
 In a single secret leader election (SSLE) protocol, all parties collectively and obliviously elect one leader. Parties other than the selected leader should not be able to learn the identity of the leader unless it is revealed by the leader itself. The problem is first formalized by Boneh *et al.* (AFT 2020), and the first concretely feasible lattice-based SSLE with proof-of-concept implementations, $\mathsf{Qelect}$, was recently introduced by Wang and Zhang (USENIX 2025).
@@ -13,6 +9,17 @@ In this work, we present $\mathsf{Relect}$, an efficient SSLE protocol, based on
 Concretely, for $32$ -- $2048$ parties, our local FHE computation runtime (a major efficiency bottleneck for SSLE) achieves $7.15$ -- $42.4\times$ faster than $\mathsf{Qelect}$ for a single thread and $7.10$ -- $48\times$ faster for 16 threads. Furthermore, we show that for the same parameters, our communication cost is also $1.14$ -- $2\times$ smaller. As mentioned, this is achieved while removing the trusted setup.
 
 In terms of end-to-end runtime, following $\mathsf{Qelect}$, we tested $2$ -- $128$ parties. we show that under the LAN setting, $\mathsf{Relect}$ is $2.77$ -- $345\times$ faster than $\mathsf{Qelect}$ per round. Under the WAN setting, $\mathsf{Relect}$ is $1.94$ to $17.2\times$ faster than $\mathsf{Qelect}$. Note that these performance gains are all achieved while removing the trusted assumption and achieving dynamic leader selection for each round.
+
+## Paper claims validated by this artifact
+
+The artifact runs on the evaluator's own hardware, so absolute timings will differ from the paper's Intel Xeon Platinum 8358 benchmark machine. Validation focuses on properties that can be checked independently of hardware.
+
+| ID  | Claim                                                                 | Validation method                                                                                                                                                                                                  |
+| --- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| C1  | Protocol correctness                                                  | Run `ssle`. Verify that all parties complete the protocol, exactly one party is elected, all parties agree on the same leader index, and the leader index is in `0..G-1`. The log should show all protocol rounds. |
+| C2  | Computation time is lower than Qelect (Figure 2)                      | Run the compute-time examples and inspect `all_compute`. For small `G`, Relect completes in milliseconds while the paper reports Qelect at seconds.                                                                |
+| C3  | Subset sampling keeps the RGSW count at 128 for `G >= 256` (Figure 2) | Run `ssle_ge_256_compute_time_improve` for large `G`; the log reports 128 RGSWs regardless of party count.                                                                                                         |
+| C4  | Communication size matches Figure 3                                   | The examples print communication estimates computed from protocol parameters; these estimates are hardware-independent.                                                                                            |
 
 ## Code structure
 
@@ -60,24 +67,16 @@ The protocol logic lives in `protocol.rs`. It provides:
 - **`run_compute_time_protocol`** — runs all phases for the two compute-time
   examples and returns per-phase timings.
 
-### Examples
-
-| Example | Purpose | Networking |
-|---------|---------|-----------|
-| `ssle` | Real distributed election. Each party runs in its own OS thread with TCP communication. Verifies the leader identity. | Yes |
-| `ssle_compute_time` | FHE benchmark, $G \leq 128$. Measures only computation time (no network I/O). Reports per-phase timing and communication estimates. | No |
-| `ssle_ge_256_compute_time_improve` | Same as above, $G \geq 256$. Uses only 128 RGSW ciphertexts via subset sampling (§2.5). | No |
-
 ## Prerequisites
 
 ### Rust toolchains
 
 Two toolchains are needed:
 
-| Toolchain | Purpose |
-|-----------|---------|
-| **stable** | Build and run functional examples (`ssle`). Requires Rust 2024 edition. Tested on 1.95.0. |
-| **nightly** | Benchmark with SIMD (`run_bench.ps1 -c nightly -s`). Tested on 1.97.0-nightly. |
+| Toolchain   | Purpose                                                                                   |
+| ----------- | ----------------------------------------------------------------------------------------- |
+| **stable**  | Build and run functional examples (`ssle`). Requires Rust 2024 edition. Tested on 1.95.0. |
+| **nightly** | Benchmark with SIMD (`run_bench.ps1 -c nightly -s`). Tested on 1.97.0-nightly.            |
 
 Install Rust via <https://rustup.rs>:
 
@@ -106,13 +105,19 @@ rustup run nightly rustc --version
 
 ## Quick start
 
+| Example                            | Purpose                                                                                                                             | Networking |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| `ssle`                             | Real distributed election. Each party runs in its own OS thread with TCP communication. Verifies the leader identity.               | Yes        |
+| `ssle_compute_time`                | FHE benchmark, $G \leq 128$. Measures only computation time (no network I/O). Reports per-phase timing and communication estimates. | No         |
+| `ssle_ge_256_compute_time_improve` | Same as above, $G \geq 256$. Uses only 128 RGSW ciphertexts via subset sampling (§2.5).                                             | No         |
+
 ### Party count → feature mapping
 
-| party count $G$ | features | example |
-|---|---|---|
-| $2 \dots 16$ | *(none)* | `ssle_compute_time` |
-| $32 \dots 128$ | `gt16` | `ssle_compute_time` |
-| $256 \dots 2048$ | `gt128` | `ssle_ge_256_compute_time_improve` |
+| party count $G$  | features | example                            |
+| ---------------- | -------- | ---------------------------------- |
+| $2 \dots 16$     | *(none)* | `ssle_compute_time`                |
+| $32 \dots 128$   | `gt16`   | `ssle_compute_time`                |
+| $256 \dots 2048$ | `gt128`  | `ssle_ge_256_compute_time_improve` |
 
 ### Functional test: real distributed election
 
@@ -133,16 +138,63 @@ cargo run --release --package ssle_core --example ssle_compute_time --features="
 cargo run --release --package ssle_core --example ssle_ge_256_compute_time_improve --features="gt128" -- -p 256
 ```
 
-## Log output
+## Quick validation path
 
-By default, the logger shows all messages at `DEBUG` level and above.
-To see only key results, set `RUST_LOG=info`:
+For evaluators who want to confirm that the artifact is functional before running the full benchmark suite:
+
+### Step 1: Build check
 
 ```bash
-RUST_LOG=info cargo run --release --package ssle_core --example ssle_compute_time -- -p 4
+cargo build --release --package ssle_core --example ssle
+cargo build --release --package ssle_core --example ssle_compute_time
+cargo build --release --package ssle_core --example ssle_ge_256_compute_time_improve --features="gt128"
 ```
 
-Each `[Phase X/5]` log line matches a step in Algorithm 2 of the paper. Phase 4 (distributed decryption) follows the protocol from Ajax (ePrint [2025/1834](https://eprint.iacr.org/2025/1834), §4.3, Fig. 10).
+### Step 2: Functional correctness (`G = 4`)
+
+```bash
+cargo run --release --package ssle_core --example ssle -- -p 4
+```
+
+Expected: one party reports `Result: party N elected as leader`, and the process ends with `All parties agree: leader is party N`.
+
+### Step 3: FHE benchmark spot checks
+
+```bash
+cargo run --release --package ssle_core --example ssle_compute_time -- -p 4
+cargo run --release --package ssle_core --example ssle_ge_256_compute_time_improve --features="gt128" -- -p 256
+```
+
+Expected: each run prints per-phase timings and communication estimates. The large-party run reports 128 RGSWs.
+
+## Reproducing paper benchmarks
+
+The paper's compute-time results were collected using the **nightly** toolchain and **SIMD** feature:
+
+```powershell
+# Windows (PowerShell)
+.\run_bench.ps1 -c nightly -s
+```
+
+```bash
+# Linux
+bash run_bench.sh -c nightly -s
+```
+
+This runs the benchmarks for all party counts (G = 2..2048, 5 repetitions each) and writes results to `results/`. For a quick single-point test:
+
+```powershell
+cargo +nightly run --release --package ssle_core --example ssle_compute_time --features="simd" -- -p 128
+```
+
+### Script options
+
+| Flag             | Description                        |
+| ---------------- | ---------------------------------- |
+| `-r N`           | Number of repetitions (default: 5) |
+| `-t "T1,T2,..."` | Thread counts (default: `"1"`)     |
+| `-c nightly`     | Use nightly toolchain              |
+| `-s`             | Enable SIMD feature                |
 
 ## Examples
 
@@ -263,36 +315,22 @@ Expected output:
 +-----------------------------+------------+
 ```
 
-## Reproducing paper benchmarks
+## Log output
 
-The paper's compute-time results were collected using the **nightly** toolchain and **SIMD** feature:
-
-```powershell
-# Windows (PowerShell)
-.\run_bench.ps1 -c nightly -s
-```
+By default, the logger shows all messages at `DEBUG` level and above.
+To see only key results, set `RUST_LOG=info`:
 
 ```bash
-# Linux
-bash run_bench.sh -c nightly -s
+RUST_LOG=info cargo run --release --package ssle_core --example ssle_compute_time -- -p 4
 ```
 
-This runs the benchmarks for all party counts (G = 2..2048, 5 repetitions each) and writes results to `results/`. For a quick single-point test:
-
-```powershell
-cargo +nightly run --release --package ssle_core --example ssle_compute_time --features="simd" -- -p 128
-```
-
-### Script options
-
-| Flag | Description |
-|------|-------------|
-| `-r N` | Number of repetitions (default: 5) |
-| `-t "T1,T2,..."` | Thread counts (default: `"1"`) |
-| `-c nightly` | Use nightly toolchain |
-| `-s` | Enable SIMD feature |
+Each `[Phase X/5]` log line matches a step in Algorithm 2 of the paper. Phase 4 (distributed decryption) follows the protocol from Ajax (ePrint [2025/1834](https://eprint.iacr.org/2025/1834), §4.3, Fig. 10).
 
 ## Notes
 
 - The `ssle` example spawns one OS thread per party and communicates over TCP on `localhost`. Ensure port range `30000..30000+party_count` is available.
 - Benchmark scripts turn off log output during runs (`RUST_LOG=off`) to keep result files clean. Running examples manually is not affected.
+
+## License
+
+Relect is dual-licensed under MIT or Apache-2.0. See `LICENSE-MIT` and `LICENSE-APACHE-2.0`.
