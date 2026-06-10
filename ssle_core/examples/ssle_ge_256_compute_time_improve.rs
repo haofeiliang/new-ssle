@@ -31,7 +31,8 @@
 use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
-use ssle_core::{KeyGen, SsleParameters, generate_dd_random, protocol};
+use num::Integer;
+use ssle_core::{CrtValueT, KeyGen, SsleParameters, generate_dd_random, protocol};
 use tabled::{Table, Tabled, settings::Rotate};
 use tracing::{debug, error, info, level_filters::LevelFilter};
 use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
@@ -197,4 +198,71 @@ fn main() {
     table.with(Rotate::Left);
     table.with(Rotate::Top);
     println!("{table}");
+
+    // Communication size estimation.
+    // Computes the bandwidth per party for Round 1 (Relect, §4.3.1) and
+    // Round 2 (distributed decryption via Ajax 2025/1834 "mask-then-open",
+    // instantiating Relect §4.3.2 + §4.4) under the current RNS parameter sets.
+    {
+        let ring_params = params.ring_params();
+        let ggsw_params = params.ggsw_params();
+        let rns_ggsw_len = ggsw_params.rns_ggsw_len();
+        let rns_glwe_len = ring_params.rns_glwe_len();
+        let big_uint_value_len = ring_params.big_uint_value_len();
+
+        let ggsw_size = std::mem::size_of::<CrtValueT>() * rns_ggsw_len;
+        let encode_commits_size = std::mem::size_of::<CrtValueT>() * rns_glwe_len * 2 * party_count;
+
+        let p = num::BigUint::from(ring_params.plain_modulus_value());
+        let q = ring_params.base_q().moduli_product();
+        let q_big = num::BigUint::from_slice(bytemuck::cast_slice(q.digits()));
+        let q_prime_big = q_big.next_multiple_of(&p);
+        let q_prime_bits = q_prime_big.bits();
+        let delta_prime_big = &q_prime_big / p;
+        let delta_prime_bits = delta_prime_big.bits();
+
+        let factor = if party_count <= 128 {
+            50.0 / 64.0
+        } else {
+            37.0 / 64.0
+        };
+
+        let size1 = (ggsw_size * (party_count - 1)) as f64 * factor / 1024.0;
+        let size2 = encode_commits_size as f64 * factor / 1024.0;
+
+        let single_size1 = ggsw_size as f64 * factor / 1024.0;
+        let single_size2 = size2 / party_count as f64;
+
+        let size2 = single_size2 * (party_count - 1) as f64;
+
+        debug!("First Round single size: {single_size1}KB");
+        debug!("Second Round single size: {single_size2}KB");
+
+        debug!("First Round size: {size1}KB");
+        debug!("Second Round size: {size2}KB");
+
+        let big_uint_poly_len = ring_params.big_uint_poly_len();
+        let per_party_elem_count = big_uint_poly_len * 2;
+
+        // Round 3 (share_to_p0): e-shares from (party_count-1) parties to party 0
+        let dec_size1 = per_party_elem_count as f64
+            * 8.0
+            * (delta_prime_bits as f64 / (big_uint_value_len as f64 * 64.0))
+            / 1024.0;
+        // Round 4 (share_v2 / broadcast): value shares to (party_count-1) peers
+        let single_dec_size2 = per_party_elem_count as f64
+            * 8.0
+            * (q_prime_bits as f64 / (big_uint_value_len as f64 * 64.0))
+            / 1024.0;
+        let dec_size2 = single_dec_size2 * (party_count - 1) as f64;
+
+        debug!("Distributed Decryption First Round size: {dec_size1}KB");
+        debug!("Distributed Decryption Second Round single size: {single_dec_size2}KB");
+        debug!("Distributed Decryption Second Round size: {dec_size2}KB");
+
+        let size = size1 + size2 + dec_size1 + dec_size2;
+
+        debug!("communication size: {size}KB");
+        debug!("communication size: {}MB", size / 1024.0);
+    }
 }

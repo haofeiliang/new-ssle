@@ -49,7 +49,6 @@ use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
 use num::Integer;
-use primus_lattice::ggsw::DcrtGgsw;
 use ssle_core::{CrtValueT, KeyGen, SsleParameters, generate_dd_random, protocol};
 use tabled::{Table, Tabled, settings::Rotate};
 use tracing::{debug, error, info, level_filters::LevelFilter};
@@ -244,7 +243,7 @@ fn main() {
         let rns_glwe_len = ring_params.rns_glwe_len();
         let big_uint_value_len = ring_params.big_uint_value_len();
 
-        let ggsw = DcrtGgsw::<Vec<CrtValueT>>::zero(rns_ggsw_len);
+        let ggsw_size = std::mem::size_of::<CrtValueT>() * rns_ggsw_len;
         let encode_commits_size = std::mem::size_of::<CrtValueT>() * rns_glwe_len * 2 * party_count;
 
         let p = num::BigUint::from(ring_params.plain_modulus_value());
@@ -261,10 +260,10 @@ fn main() {
             37.0 / 64.0
         };
 
-        let size1 = (ggsw.byte_count() * (party_count - 1)) as f64 * factor / 1024.0;
+        let size1 = (ggsw_size * (party_count - 1)) as f64 * factor / 1024.0;
         let size2 = encode_commits_size as f64 * factor / 1024.0;
 
-        let single_size1 = ggsw.byte_count() as f64 * factor / 1024.0;
+        let single_size1 = ggsw_size as f64 * factor / 1024.0;
         let single_size2 = size2 / party_count as f64;
 
         let size2 = single_size2 * (party_count - 1) as f64;
@@ -275,13 +274,16 @@ fn main() {
         debug!("First Round size: {size1}KB");
         debug!("Second Round size: {size2}KB");
 
-        let p0_e_share_len = big_uint_value_len * 2;
-        let dec_size1 = p0_e_share_len as f64
+        let big_uint_poly_len = ring_params.big_uint_poly_len();
+        let per_party_elem_count = big_uint_poly_len * 2;
+
+        // Round 3 (share_to_p0): e-shares from (party_count-1) parties to party 0
+        let dec_size1 = per_party_elem_count as f64
             * 8.0
             * (delta_prime_bits as f64 / (big_uint_value_len as f64 * 64.0))
             / 1024.0;
-        let p0_big_uint_len = big_uint_value_len * 2;
-        let single_dec_size2 = p0_big_uint_len as f64
+        // Round 4 (share_v2 / broadcast): value shares to (party_count-1) peers
+        let single_dec_size2 = per_party_elem_count as f64
             * 8.0
             * (q_prime_bits as f64 / (big_uint_value_len as f64 * 64.0))
             / 1024.0;
