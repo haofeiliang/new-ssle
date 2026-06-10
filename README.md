@@ -1,5 +1,9 @@
 # Relect
 
+## License
+
+Relect is dual-licensed under MIT or Apache-2.0. See `LICENSE-MIT` and `LICENSE-APACHE-2.0`.
+
 ## Abstract
 
 In a single secret leader election (SSLE) protocol, all parties collectively and obliviously elect one leader. Parties other than the selected leader should not be able to learn the identity of the leader unless it is revealed by the leader itself. The problem is first formalized by Boneh *et al.* (AFT 2020), and the first concretely feasible lattice-based SSLE with proof-of-concept implementations, $\mathsf{Qelect}$, was recently introduced by Wang and Zhang (USENIX 2025).
