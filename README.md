@@ -6,9 +6,9 @@ In a single secret leader election (SSLE) protocol, all parties collectively and
 
 In this work, we present $\mathsf{Relect}$, an efficient SSLE protocol, based on the Ring Learning with Error assumption. We build it by leveraging the algebraic structure of the underlying threshold Fully Homomorphic Encryption (FHE) and by designing tailored homomorphic circuits. Compared to prior works, $\mathsf{Relect}$ (1) achieves substantially higher efficiency and (2) removes the strong environment assumption in $\mathsf{Qelect}$ (a trusted setup), and thereby also allows a dynamic leader selection for each round.
 
-Concretely, for $32$ -- $2048$ parties, our local FHE computation runtime achieves $7.15$ -- $42.4\times$ faster than $\mathsf{Qelect}$, which **is** the major efficiency bottleneck of the entire SSLE procedure. Furthermore, we show that for the same parameters, our communication cost is also $1.14$ -- $2\times$ smaller. As mentioned, this is achieved while removing the trusted setup.
+Concretely, for $32$ -- $2048$ parties, our local FHE computation runtime (a major efficiency bottleneck for SSLE) achieves $7.15$ -- $42.4\times$ faster than $\mathsf{Qelect}$ for a single thread and $7.10$ -- $48\times$ faster for 16 threads. Furthermore, we show that for the same parameters, our communication cost is also $1.14$ -- $2\times$ smaller. As mentioned, this is achieved while removing the trusted setup.
 
-In terms of end-to-end runtime, following $\mathsf{Qelect}$, we tested $2$ -- $128$ parties. we show that under the LAN setting, $\mathsf{Relect}$ is $2.77$ -- $335\times$ faster than $\mathsf{Qelect}$ per round. Under the WAN setting, $\mathsf{Relect}$ is $1.94$ to $17.2\times$ faster than $\mathsf{Qelect}$. Note that these performance gains are all achieved while removing the trusted assumption and achieving dynamic leader selection for each round.
+In terms of end-to-end runtime, following $\mathsf{Qelect}$, we tested $2$ -- $128$ parties. we show that under the LAN setting, $\mathsf{Relect}$ is $2.77$ -- $345\times$ faster than $\mathsf{Qelect}$ per round. Under the WAN setting, $\mathsf{Relect}$ is $1.94$ to $17.2\times$ faster than $\mathsf{Qelect}$. Note that these performance gains are all achieved while removing the trusted assumption and achieving dynamic leader selection for each round.
 
 ## Code structure
 
