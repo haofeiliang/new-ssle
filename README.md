@@ -184,7 +184,7 @@ bash run_bench.sh -c nightly -s
 This runs the benchmarks for all party counts (G = 2..2048, 5 repetitions each) and writes results to `results/`. For a quick single-point test:
 
 ```powershell
-cargo +nightly run --release --package ssle_core --example ssle_compute_time --features="simd" -- -p 128
+cargo +nightly run --release --package ssle_core --example ssle_compute_time --features="gt16 simd" -- -p 128
 ```
 
 ### Script options
