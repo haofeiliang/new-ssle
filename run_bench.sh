@@ -4,6 +4,8 @@
 #   -t, --threads LIST  comma-separated thread counts (default: "1")
 #   -c, --toolchain TC  cargo toolchain, e.g. "nightly" or "+nightly"
 #   -s, --simd          enable simd feature
+#   -o, --output-dir DIR  results directory (default: results)
+#       --result-tag TAG  filename stem before _tN.txt (default: timestamp and flags)
 #
 # Examples:
 #   ./run_bench.sh -r 5 -t "1,2,4,8,16,32" -c nightly
@@ -18,6 +20,8 @@ REPEATS=5
 THREADS_ARG="1"
 TOOLCHAIN_ARG=""
 SIMD=false
+OUTPUT_DIR="results"
+RESULT_TAG=""
 
 # Parse arguments
 while [ $# -gt 0 ]; do
@@ -26,12 +30,16 @@ while [ $# -gt 0 ]; do
         -t|--threads)   THREADS_ARG="$2"; shift 2 ;;
         -c|--toolchain) TOOLCHAIN_ARG="$2"; shift 2 ;;
         -s|--simd)      SIMD=true; shift ;;
+        -o|--output-dir) OUTPUT_DIR="${2:?--output-dir requires a directory}"; shift 2 ;;
+        --result-tag)   RESULT_TAG="${2:?--result-tag requires a filename stem}"; shift 2 ;;
         -h|--help)      cat <<'USAGE'
 Usage: ./run_bench.sh [OPTIONS]
   -r, --repeat N      number of runs per test (default: 5)
   -t, --threads LIST  comma-separated thread counts (default: "1")
   -c, --toolchain TC  cargo toolchain, e.g. "nightly" or "+nightly"
   -s, --simd          enable simd feature
+  -o, --output-dir DIR  results directory (default: results)
+      --result-tag TAG  filename stem before _tN.txt (default: timestamp and flags)
   -h, --help          show this help message
 
 Examples:
@@ -77,20 +85,23 @@ fi
 echo ""
 
 # --- Output setup ---
-OUTPUT_DIR="results"
-mkdir -p "$OUTPUT_DIR"
-TIMESTAMP=$(date +%Y%m%d_%H%M)
-
-# Result file tag (append _nightly / _simd as needed)
-RESULT_TAG="$TIMESTAMP"
-if [ -n "$CARGO_TC" ] && [[ "$CARGO_TC" == *nightly* ]]; then
-    RESULT_TAG="${TIMESTAMP}_nightly"
+if [[ "$RESULT_TAG" == */* ]]; then
+    echo "Use --output-dir for the directory and --result-tag for the filename stem." >&2
+    exit 1
 fi
-if [ "$SIMD" = true ]; then
-    RESULT_TAG="${RESULT_TAG}_simd"
+mkdir -p -- "$OUTPUT_DIR"
+if [ -z "$RESULT_TAG" ]; then
+    RESULT_TAG=$(date +%Y%m%d_%H%M)
+    if [ -n "$CARGO_TC" ] && [[ "$CARGO_TC" == *nightly* ]]; then
+        RESULT_TAG="${RESULT_TAG}_nightly"
+    fi
+    if [ "$SIMD" = true ]; then
+        RESULT_TAG="${RESULT_TAG}_simd"
+    fi
+    BUILD_LOG="$OUTPUT_DIR/build_log.txt"
+else
+    BUILD_LOG="$OUTPUT_DIR/${RESULT_TAG}_build_log.txt"
 fi
-
-BUILD_LOG="$OUTPUT_DIR/build_log.txt"
 : > "$BUILD_LOG"
 
 echo "Results: ${OUTPUT_DIR}/${RESULT_TAG}_t*.txt"

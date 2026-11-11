@@ -181,7 +181,17 @@ The paper's compute-time results were collected using the **nightly** toolchain 
 bash run_bench.sh -c nightly -s
 ```
 
-This runs the benchmarks for all party counts (G = 2..2048, 5 repetitions each) and writes results to `results/`. For a quick single-point test:
+These commands run the benchmarks for all party counts (G = 2..2048, 5 repetitions each) and write results to `results/`.
+
+On Linux and macOS, use `--output-dir` and `--result-tag` to save a named run.
+
+```bash
+bash run_bench.sh -c nightly -s -t 1,2,4 --output-dir ../bench-results --result-tag relect-nightly
+```
+
+This writes `relect-nightly_t1.txt`, `relect-nightly_t2.txt`, `relect-nightly_t4.txt`, and `relect-nightly_build_log.txt` in the chosen directory.
+
+For a quick single-point test:
 
 ```powershell
 cargo +nightly run --release --package ssle_core --example ssle_compute_time --features="gt16 simd" -- -p 128
@@ -189,12 +199,14 @@ cargo +nightly run --release --package ssle_core --example ssle_compute_time --f
 
 ### Script options
 
-| Flag             | Description                        |
-| ---------------- | ---------------------------------- |
-| `-r N`           | Number of repetitions (default: 5) |
-| `-t "T1,T2,..."` | Thread counts (default: `"1"`)     |
-| `-c nightly`     | Use nightly toolchain              |
-| `-s`             | Enable SIMD feature                |
+| Flag | Description |
+| --- | --- |
+| `-r N` | Number of repetitions (default: 5) |
+| `-t "T1,T2,..."` | Thread counts (default: `"1"`) |
+| `-c nightly` | Use nightly toolchain |
+| `-s` | Enable SIMD feature |
+| `--output-dir DIR` | Bash output directory (default: `results`) |
+| `--result-tag TAG` | Bash filename stem before `_tN.txt` (default: timestamp and build flags) |
 
 ## Examples
 
